@@ -9,6 +9,11 @@ jobs:
     # Uniquement pour les issues avec le label widget-generation
     if: contains(github.event.issue.labels.*.name, 'widget-generation')
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      issues: write
+      actions: write
     
     steps:
       # 1. Checkout du repo public
