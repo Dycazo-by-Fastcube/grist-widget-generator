@@ -1,5 +1,7 @@
 // api/create-issue.ts
-// Vercel Edge Function - Crée une issue GitHub de manière sécurisée
+// Vercel Serverless Function (Node.js) - Crée une issue GitHub
+
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 interface RequestBody {
   nom_module: string;
@@ -7,51 +9,41 @@ interface RequestBody {
   type_app: string;
 }
 
-export default async function handler(req: Request) {
+export default async function handler(
+  req: VercelRequest,
+  res: VercelResponse
+) {
   // CORS headers
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json',
-  };
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   // Handle preflight
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers });
+    return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
-    return new Response(
-      JSON.stringify({ error: 'Method not allowed' }),
-      { status: 405, headers }
-    );
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    // Parse request body
-    const body: RequestBody = await req.json();
-    const { nom_module, description, type_app } = body;
+    // Parse request body (already parsed by Vercel)
+    const { nom_module, description, type_app } = req.body as RequestBody;
 
     // Validate
     if (!nom_module || !description || !type_app) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required fields' }),
-        { status: 400, headers }
-      );
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Get environment variables (Edge Runtime uses Deno)
+    // Get environment variables
     const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
     const GITHUB_OWNER = process.env.GITHUB_OWNER;
     const GITHUB_REPO = process.env.GITHUB_REPO || 'grist-widget-generator';
 
     if (!GITHUB_TOKEN || !GITHUB_OWNER) {
       console.error('Missing environment variables');
-      return new Response(
-        JSON.stringify({ error: 'Server configuration error' }),
-        { status: 500, headers }
-      );
+      return res.status(500).json({ error: 'Server configuration error' });
     }
 
     // Create issue via GitHub API
@@ -79,36 +71,27 @@ export default async function handler(req: Request) {
     if (!githubResponse.ok) {
       const errorData = await githubResponse.json();
       console.error('GitHub API error:', errorData);
-      return new Response(
-        JSON.stringify({ 
-          error: 'Failed to create issue',
-          details: errorData.message 
-        }),
-        { status: githubResponse.status, headers }
-      );
+      return res.status(githubResponse.status).json({
+        error: 'Failed to create issue',
+        details: errorData.message,
+      });
     }
 
     const issue = await githubResponse.json();
 
     // Success response
-    return new Response(
-      JSON.stringify({
-        success: true,
-        issue_number: issue.number,
-        issue_url: issue.html_url,
-        message: 'Widget generation started! Check the issue for progress.',
-      }),
-      { status: 200, headers }
-    );
+    return res.status(200).json({
+      success: true,
+      issue_number: issue.number,
+      issue_url: issue.html_url,
+      message: 'Widget generation started! Check the issue for progress.',
+    });
 
   } catch (error) {
     console.error('Error:', error);
-    return new Response(
-      JSON.stringify({ 
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      }),
-      { status: 500, headers }
-    );
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
 }
