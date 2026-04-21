@@ -78,30 +78,9 @@ jobs:
             const files = fs.readdirSync('.').filter(f => f.endsWith('.grist'));
             const filename = files[0];
             
-            const comment = `## ✅ Votre widget est prêt !
-            
-**📦 Fichier généré :** \`${filename}\`
-
-**⬇️ Téléchargement :**
-Cliquez sur "Summary" en haut de cette page → Section "Artifacts" → Téléchargez \`widget-grist\`
-
-**📋 Contenu :**
-- ✅ Tables Projets + Taches
-- ✅ Colonnes ACL (RLS ready)
-- ✅ 2 tâches de démonstration
-- ✅ Patterns des skills appliqués
-
-**🚀 Import dans Grist :**
-1. Dézippez le fichier téléchargé
-2. Allez sur votre instance Grist
-3. Add New → Import document
-4. Sélectionnez le fichier \`.grist\`
-
-_Généré en ${process.env.GITHUB_RUN_ID}_`;
-            
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: comment
+              body: `Votre widget est pret !\n\nFichier: ${filename}\n\nAllez dans Actions > Summary > Artifacts pour telecharger`
             });
