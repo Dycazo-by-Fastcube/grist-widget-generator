@@ -32,24 +32,21 @@ jobs:
       - name: Parser issue
         id: parse
         run: |
-          # Extraire le titre = nom du module
           echo "nom_module=${{ github.event.issue.title }}" >> $GITHUB_OUTPUT
           
-          # Extraire description et type depuis le body
           BODY="${{ github.event.issue.body }}"
           
-          # Extraire description (ligne après **Description :**)
-          DESC=$(echo "$BODY" | grep -A1 "Description :" | tail -n1 | xargs)
-          echo "description=$DESC" >> $GITHUB_OUTPUT
+          # Extraire la description (tout ce qui suit "Description :" jusqu'à la ligne vide)
+          DESC=$(echo "$BODY" | sed -n '/Description :/,/^$/p' | sed '1d;$d' | tr -d '\n' | xargs)
+          echo "description=${DESC:-Application de gestion}" >> $GITHUB_OUTPUT
           
-          # Extraire type (ligne après **Type :**)
-          TYPE=$(echo "$BODY" | grep -A1 "Type :" | tail -n1 | xargs)
-          echo "type_app=$TYPE" >> $GITHUB_OUTPUT
+          # Extraire le type (tout ce qui suit "Type :" jusqu'à la ligne vide)  
+          TYPE=$(echo "$BODY" | sed -n '/Type :/,/^$/p' | sed '1d;$d' | tr -d '\n' | xargs)
+          echo "type_app=${TYPE:-liste}" >> $GITHUB_OUTPUT
           
-          echo "✅ Données extraites"
-          echo "  Nom: ${{ github.event.issue.title }}"
-          echo "  Description: $DESC"
-          echo "  Type: $TYPE"
+          echo "Parsed - Nom: ${{ github.event.issue.title }}"
+          echo "Parsed - Description: $DESC"
+          echo "Parsed - Type: $TYPE"
       
       # 4. Générer le .grist
       - name: Générer widget
