@@ -1,0 +1,102 @@
+name: Générer Widget Grist
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  generate-widget:
+    # Uniquement pour les issues avec le label widget-generation
+    if: contains(github.event.issue.labels.*.name, 'widget-generation')
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. Checkout du repo public
+      - name: Checkout repo public
+        uses: actions/checkout@v4
+      
+      # 2. Checkout du repo privé avec les skills
+      - name: Checkout skills privés
+        uses: actions/checkout@v4
+        with:
+          repository: Dycazo-by-Fastcube/fastc-internal-tools  # ← CHANGE TON_USERNAME
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: skills-repo
+      
+      # 3. Parser l'issue pour extraire les données
+      - name: Parser issue
+        id: parse
+        run: |
+          # Extraire le titre = nom du module
+          echo "nom_module=${{ github.event.issue.title }}" >> $GITHUB_OUTPUT
+          
+          # Extraire description et type depuis le body
+          BODY="${{ github.event.issue.body }}"
+          
+          # Extraire description (ligne après **Description :**)
+          DESC=$(echo "$BODY" | grep -A1 "Description :" | tail -n1 | xargs)
+          echo "description=$DESC" >> $GITHUB_OUTPUT
+          
+          # Extraire type (ligne après **Type :**)
+          TYPE=$(echo "$BODY" | grep -A1 "Type :" | tail -n1 | xargs)
+          echo "type_app=$TYPE" >> $GITHUB_OUTPUT
+          
+          echo "✅ Données extraites"
+          echo "  Nom: ${{ github.event.issue.title }}"
+          echo "  Description: $DESC"
+          echo "  Type: $TYPE"
+      
+      # 4. Générer le .grist
+      - name: Générer widget
+        run: |
+          python3 generate.py \
+            "${{ steps.parse.outputs.nom_module }}" \
+            "${{ steps.parse.outputs.description }}" \
+            "${{ steps.parse.outputs.type_app }}" \
+            "Document_sans_titre.grist" \
+            "skills-repo/01-skills-universels"
+      
+      # 5. Upload en artifact
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: widget-grist
+          path: "*.grist"
+          retention-days: 7
+      
+      # 6. Commenter l'issue avec le lien
+      - name: Commenter issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const files = fs.readdirSync('.').filter(f => f.endsWith('.grist'));
+            const filename = files[0];
+            
+            const comment = `## ✅ Votre widget est prêt !
+            
+**📦 Fichier généré :** \`${filename}\`
+
+**⬇️ Téléchargement :**
+Cliquez sur "Summary" en haut de cette page → Section "Artifacts" → Téléchargez \`widget-grist\`
+
+**📋 Contenu :**
+- ✅ Tables Projets + Taches
+- ✅ Colonnes ACL (RLS ready)
+- ✅ 2 tâches de démonstration
+- ✅ Patterns des skills appliqués
+
+**🚀 Import dans Grist :**
+1. Dézippez le fichier téléchargé
+2. Allez sur votre instance Grist
+3. Add New → Import document
+4. Sélectionnez le fichier \`.grist\`
+
+_Généré en ${process.env.GITHUB_RUN_ID}_`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
