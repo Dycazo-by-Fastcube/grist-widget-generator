@@ -1,10 +1,6 @@
 // api/create-issue.ts
 // Vercel Edge Function - Crée une issue GitHub de manière sécurisée
 
-export const config = {
-  runtime: 'edge',
-};
-
 interface RequestBody {
   nom_module: string;
   description: string;
@@ -46,9 +42,9 @@ export default async function handler(req: Request) {
     }
 
     // Get environment variables (Edge Runtime uses Deno)
-    const GITHUB_TOKEN = Deno.env.get('GITHUB_TOKEN');
-    const GITHUB_OWNER = Deno.env.get('GITHUB_OWNER');
-    const GITHUB_REPO = Deno.env.get('GITHUB_REPO') || 'grist-widget-generator';
+    const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+    const GITHUB_OWNER = process.env.GITHUB_OWNER;
+    const GITHUB_REPO = process.env.GITHUB_REPO || 'grist-widget-generator';
 
     if (!GITHUB_TOKEN || !GITHUB_OWNER) {
       console.error('Missing environment variables');
