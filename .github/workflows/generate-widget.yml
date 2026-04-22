@@ -54,7 +54,7 @@ jobs:
             "$ISSUE_TITLE" \
             "/tmp/spec_body.txt" \
             "custom" \
-            "Document_sans_titre.grist" \
+            "default.grist" \
             "skills-repo/01-skills-universels" \
             "${{ steps.slug.outputs.widget_url }}"
 

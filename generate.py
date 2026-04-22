@@ -183,36 +183,53 @@ Réponds UNIQUEMENT avec le code HTML complet, sans bloc markdown ni explication
 # 3. Ajouter la page widget custom dans le .grist
 # ---------------------------------------------------------------------------
 
-def ajouter_section_custom_widget(cur, widget_url, n_tables):
+def ajouter_section_custom_widget(cur, widget_url, n_tables, field_id, first_visible_col_ref):
     """Ajoute une page 'Widget' avec une section custom dans le .grist."""
     SECTIONS_PER_TABLE = 3
     view_id    = n_tables * SECTIONS_PER_TABLE + 1
-    section_id = view_id
+    section_id = n_tables * SECTIONS_PER_TABLE + 1
     page_id    = n_tables + 1
 
-    cur.execute("PRAGMA table_info(_grist_Views_section)")
-    col_names = {row[1] for row in cur.fetchall()}
+    layout_spec = json.dumps({"children": [{"leaf": section_id}], "collapsed": []})
 
-    if 'customDef' not in col_names:
-        cur.execute("ALTER TABLE _grist_Views_section ADD COLUMN customDef TEXT DEFAULT ''")
-        print("✅ Colonne customDef ajoutée au schéma")
+    custom_view_json = json.dumps({
+        "mode": "url",
+        "url": widget_url or "",
+        "widgetDef": None,
+        "access": "full",
+        "pluginId": "",
+        "sectionId": "",
+        "renderAfterReady": False,
+        "widgetId": None,
+        "widgetOptions": None,
+        "columnsMapping": None,
+    })
+    options_json = json.dumps({
+        "verticalGridlines": True,
+        "horizontalGridlines": True,
+        "zebraStripes": False,
+        "customView": custom_view_json,
+        "numFrozen": 0,
+    })
 
-    cur.execute("INSERT INTO _grist_Views VALUES (?, 'Widget', 'custom', '')", (view_id,))
+    cur.execute(
+        "INSERT INTO _grist_Views (id, name, type, layoutSpec) VALUES (?,?,?,?)",
+        (view_id, 'Widget', 'raw_data', layout_spec)
+    )
     cur.execute(
         "INSERT INTO _grist_Views_section "
-        "(id, tableRef, parentId, parentKey, title, defaultWidth, borderWidth, customDef) "
-        "VALUES (?,0,?,'custom','Widget',100,1,?)",
-        (section_id, view_id, widget_url)
+        "(id, tableRef, parentId, parentKey, title, defaultWidth, borderWidth, options) "
+        "VALUES (?,?,?,'custom','',100,1,?)",
+        (section_id, 1, view_id, options_json)
     )
-
-    cur.execute("SELECT customDef FROM _grist_Views_section WHERE id = ?", (section_id,))
-    row = cur.fetchone()
-    stored = row[0] if row else None
-    print(f"🔍 customDef stocké : '{stored[:80] if stored else 'VIDE!'}'")
+    cur.execute(
+        "INSERT INTO _grist_Views_section_field (id, parentId, colRef, width) VALUES (?,?,?,?)",
+        (field_id, section_id, first_visible_col_ref, 0)
+    )
 
     cur.execute("INSERT INTO _grist_Pages VALUES (?,?,0,?,0,'')", (page_id, view_id, n_tables + 1))
     cur.execute("INSERT INTO _grist_TabBar VALUES (?,?,?)", (page_id, view_id, n_tables + 1))
-    print(f"✅ Page widget custom ajoutée (view_id={view_id})")
+    print(f"✅ Page widget custom ajoutée (view_id={view_id}, section_id={section_id}, url={widget_url})")
 
 
 # ---------------------------------------------------------------------------
@@ -267,21 +284,21 @@ def generer_widget(nom_module, description, type_app, template_path, skills_path
     # Générer le schéma de colonnes adapté à la spec
     schema = generer_schema_tables(spec)
 
-    # Nettoyer Table1 du template
-    cur.execute("DROP TABLE IF EXISTS Table1")
-    cur.execute("DELETE FROM _grist_Tables WHERE tableId='Table1'")
-    cur.execute("DELETE FROM _grist_Tables_column WHERE parentId=1")
-    cur.execute("DELETE FROM _grist_Views WHERE name='Table1'")
-    cur.execute("DELETE FROM _grist_Views_section WHERE tableRef=1")
-    cur.execute("DELETE FROM _grist_Views_section_field WHERE parentId IN (1,2,3)")
-    cur.execute("DELETE FROM _grist_Pages WHERE viewRef=1")
-    cur.execute("DELETE FROM _grist_TabBar WHERE viewRef=1")
-    print("✅ Template nettoyé")
+    # Nettoyer entièrement le template (toutes les tables user + toutes les métadonnées Grist)
+    existing_tables = cur.execute("SELECT tableId FROM _grist_Tables").fetchall()
+    for (tid,) in existing_tables:
+        cur.execute(f'DROP TABLE IF EXISTS "{tid}"')
+    for meta in ['_grist_Tables', '_grist_Tables_column', '_grist_Views',
+                 '_grist_Views_section', '_grist_Views_section_field',
+                 '_grist_Pages', '_grist_TabBar']:
+        cur.execute(f'DELETE FROM {meta}')
+    print(f"✅ Template nettoyé ({len(existing_tables)} tables supprimées)")
 
     SECTIONS_PER_TABLE = 3
     col_id   = 1  # compteur global croissant
     field_id = 1  # compteur global croissant
     acl_formula = '$responsable_email'
+    first_visible_col_ref = None  # colRef de la 1re colonne visible (pour la section custom)
 
     for i, table_name in enumerate(tables_list):
         table_ref = i + 1
@@ -325,6 +342,8 @@ def generer_widget(nom_module, description, type_app, template_path, skills_path
         # colonnes de données (visibles)
         visible_col_ids = []
         for pos, c in enumerate(data_cols, start=1):
+            if first_visible_col_ref is None:
+                first_visible_col_ref = col_id
             widget_opts = ''
             if c['type'] == 'Choice' and c.get('choices'):
                 widget_opts = json.dumps({"choices": c['choices']})
@@ -380,8 +399,8 @@ def generer_widget(nom_module, description, type_app, template_path, skills_path
 
     # Générer le code widget HTML et l'intégrer
     widget_html = generer_code_widget(spec, skills)
-    if widget_html and widget_url:
-        ajouter_section_custom_widget(cur, widget_url, len(tables_list))
+    if widget_url:
+        ajouter_section_custom_widget(cur, widget_url, len(tables_list), field_id, first_visible_col_ref)
 
     conn.commit()
     conn.close()
