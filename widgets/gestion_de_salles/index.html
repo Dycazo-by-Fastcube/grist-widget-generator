@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Gestion de salles</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f6f9;color:#222;padding:16px}
+h1{font-size:20px;margin-bottom:12px;color:#1a56db}
+h2{font-size:15px;margin:0 0 8px;color:#333}
+.tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid #e5e7eb}
+.tab{padding:8px 14px;cursor:pointer;background:none;border:none;font-size:14px;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px}
+.tab.active{color:#1a56db;border-bottom-color:#1a56db;font-weight:600}
+.card{background:#fff;border-radius:8px;padding:14px;box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #eee}
+th{background:#f9fafb;font-weight:600;color:#374151;font-size:12px;text-transform:uppercase}
+tr:hover{background:#f9fafb}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.badge-admin{background:#fee2e2;color:#991b1b}
+.badge-user{background:#dbeafe;color:#1e40af}
+.badge-ok{background:#d1fae5;color:#065f46}
+.info{padding:10px;background:#eff6ff;border-left:3px solid #1a56db;border-radius:4px;font-size:13px;margin-bottom:12px}
+.empty{text-align:center;padding:24px;color:#999;font-style:italic}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:12px}
+.stat{background:#fff;padding:12px;border-radius:8px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.stat-val{font-size:22px;font-weight:700;color:#1a56db}
+.stat-lbl{font-size:11px;color:#666;text-transform:uppercase;margin-top:2px}
+.loading{text-align:center;padding:30px;color:#666}
+.toast{position:fixed;top:16px;right:16px;padding:10px 14px;border-radius:6px;background:#1a56db;color:#fff;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:1000}
+.toast.err{background:#dc2626}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect}=React;
+
+const toRows=(t)=>{const ids=t.id||[];return ids.map((id,i)=>{const r={id};Object.keys(t).forEach(k=>{if(k!=='id')r[k]=t[k][i]});return r})};
+
+const fmt=(v)=>{
+  if(v==null||v==='')return '—';
+  if(typeof v==='number'&&v>1000000000&&v<9999999999)return new Date(v*1000).toLocaleString('fr-FR');
+  if(Array.isArray(v))return v.slice(1).join(', ');
+  return String(v);
+};
+
+function App(){
+  const [tab,setTab]=useState('reservations');
+  const [salles,setSalles]=useState([]);
+  const [users,setUsers]=useState([]);
+  const [reservations,setReservations]=useState([]);
+  const [creneaux,setCreneaux]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [toast,setToast]=useState(null);
+  const [me,setMe]=useState(null);
+
+  const notify=(msg,type)=>{setToast({msg,type});setTimeout(()=>setToast(null),2500)};
+
+  const load=async()=>{
+    setLoading(true);
+    const tryFetch=async(n)=>{try{return toRows(await grist.docApi.fetchTable(n))}catch(e){return[]}};
+    const [s,u,r,c]=await Promise.all([
+      tryFetch('Salle'),tryFetch('Utilisateur'),tryFetch('Reservation'),tryFetch('Creneau')
+    ]);
+    setSalles(s);setUsers(u);setReservations(r);setCreneaux(c);
+    setLoading(false);
+  };
+
+  useEffect(()=>{
+    grist.ready({requiredAccess:'full'});
+    grist.onRecords(async(records)=>{
+      if(records&&records[0]){
+        const r=records[0];
+        setMe({email:r.email||r.Email||null,role:r.role||r.Role||'utilisateur'});
+      }
+      await load();
+    });
+    load().catch(e=>{notify('Erreur: '+e.message,'err');setLoading(false)});
+  },[]);
+
+  const isAdmin=me?.role==='Admin';
+
+  const renderTable=(rows,cols,empty)=>{
+    if(!rows.length)return <div className="empty">{empty}</div>;
+    return(
+      <table>
+        <thead><tr>{cols.map(c=><th key={c.k}>{c.l}</th>)}</tr></thead>
+        <tbody>
+          {rows.map(r=>(
+            <tr key={r.id}>
+              {cols.map(c=><td key={c.k}>{c.r?c.r(r):fmt(r[c.k])}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
+
+  const sallesCols=[
+    {k:'id',l:'ID'},
+    {k:'nom',l:'Nom',r:(r)=>r.nom||r.Nom||r.name||'—'},
+    {k:'capacite',l:'Capacité',r:(r)=>fmt(r.capacite||r.Capacite||r.capacity)},
+    {k:'localisation',l:'Localisation',r:(r)=>fmt(r.localisation||r.Localisation||r.lieu)},
+  ];
+  const usersCols=[
+    {k:'id',l:'ID'},
+    {k:'nom',l:'Nom',r:(r)=>r.nom||r.Nom||r.name||'—'},
+    {k:'email',l:'Email',r:(r)=>fmt(r.email||r.Email)},
+    {k:'role',l:'Rôle',r:(r)=>{
+      const role=r.role||r.Role||'utilisateur';
+      return <span className={'badge '+(role==='Admin'?'badge-admin':'badge-user')}>{role}</span>;
+    }},
+  ];
+  const resCols=[
+    {k:'id',l:'ID'},
+    {k:'utilisateur',l:'Utilisateur',r:(r)=>r.gristHelper_Display||fmt(r.utilisateur||r.Utilisateur||r.user)},
+    {k:'salle',l:'Salle',r:(r)=>r.gristHelper_Display2||fmt(r.salle||r.Salle)},
+    {k:'creneau',l:'Créneau',r:(r)=>r.gristHelper_Display3||fmt(r.creneau||r.Creneau)},
+    {k:'statut',l:'Statut',r:(r)=>{
+      const s=r.statut||r.Statut||'confirmé';
+      return <span className="badge badge-ok">{s}</span>;
+    }},
+  ];
+  const creneauxCols=[
+    {k:'id',l:'ID'},
+    {k:'debut',l:'Début',r:(r)=>fmt(r.debut||r.Debut||r.date_debut)},
+    {k:'fin',l:'Fin',r:(r)=>fmt(r.fin||r.Fin||r.date_fin)},
+    {k:'jour',l:'Jour',r:(r)=>fmt(r.jour||r.Jour||r.date)},
+  ];
+
+  if(loading)return <div className="loading">Chargement…</div>;
+
+  return(
+    <div>
+      <h1>🏢 Gestion de salles</h1>
+      {me&&<div className="info">
+        Connecté : <strong>{me.email||'Utilisateur'}</strong>
+        <span className={'badge '+(isAdmin?'badge-admin':'badge-user')} style={{marginLeft:8}}>{me.role}</span>
+        {!isAdmin&&<span style={{marginLeft:8,color:'#666'}}>— Consultation et réservations</span>}
+      </div>}
+
+      <div className="stats">
+        <div className="stat"><div className="stat-val">{salles.length}</div><div className="stat-lbl">Salles</div></div>
+        <div className="stat"><div className="stat-val">{reservations.length}</div><div className="stat-lbl">Réservations</div></div>
+        <div className="stat"><div className="stat-val">{creneaux.length}</div><div className="stat-lbl">Créneaux</div></div>
+        <div className="stat"><div className="stat-val">{users.length}</div><div className="stat-lbl">Utilisateurs</div></div>
+      </div>
+
+      <div className="tabs">
+        <button className={'tab'+(tab==='reservations'?' active':'')} onClick={()=>setTab('reservations')}>Réservations</button>
+        <button className={'tab'+(tab==='salles'?' active':'')} onClick={()=>setTab('salles')}>Salles</button>
+        <button className={'tab'+(tab==='creneaux'?' active':'')} onClick={()=>setTab('creneaux')}>Créneaux</button>
+        <button className={'tab'+(tab==='users'?' active':'')} onClick={()=>setTab('users')}>Utilisateurs</button>
+      </div>
+
+      <div className="card">
+        {tab==='reservations'&&<><h2>Réservations</h2>{renderTable(reservations,resCols,'Aucune réservation')}</>}
+        {tab==='salles'&&<><h2>Salles disponibles</h2>{renderTable(salles,sallesCols,'Aucune salle')}</>}
+        {tab==='creneaux'&&<><h2>Créneaux</h2>{renderTable(creneaux,creneauxCols,'Aucun créneau')}</>}
+        {tab==='users'&&<><h2>Utilisateurs</h2>{renderTable(users,usersCols,'Aucun utilisateur')}</>}
+      </div>
+
+      {toast&&<div className={'toast'+(toast.type==='err'?' err':'')}>{toast.msg}</div>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
