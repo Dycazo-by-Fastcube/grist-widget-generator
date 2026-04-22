@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Listing Matériel Informatique</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f5f7fa;
+    color: #2c3e50;
+  }
+  #root { padding: 20px; }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .header h1 {
+    margin: 0;
+    font-size: 22px;
+    color: #1a237e;
+  }
+  .stats {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .stat-card {
+    background: white;
+    padding: 10px 16px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    min-width: 100px;
+  }
+  .stat-card .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: #7f8c8d;
+    letter-spacing: 0.5px;
+  }
+  .stat-card .value {
+    font-size: 20px;
+    font-weight: 600;
+    color: #1a237e;
+  }
+  .toolbar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .toolbar input, .toolbar select {
+    padding: 8px 12px;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    font-size: 14px;
+    background: white;
+  }
+  .toolbar input {
+    flex: 1;
+    min-width: 200px;
+  }
+  .table-wrapper {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    overflow-x: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  th {
+    background: #f8f9fa;
+    text-align: left;
+    padding: 12px 16px;
+    font-weight: 600;
+    color: #495057;
+    border-bottom: 2px solid #e9ecef;
+    position: sticky;
+    top: 0;
+    cursor: pointer;
+    user-select: none;
+  }
+  th:hover { background: #e9ecef; }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #f1f3f5;
+  }
+  tr:hover td { background: #f8f9fa; }
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #e3f2fd;
+    color: #1565c0;
+  }
+  .badge-cat {
+    background: #f3e5f5;
+    color: #6a1b9a;
+  }
+  .badge-user {
+    background: #e8f5e9;
+    color: #2e7d32;
+  }
+  .badge-none {
+    background: #f5f5f5;
+    color: #9e9e9e;
+  }
+  .loading, .empty {
+    text-align: center;
+    padding: 40px;
+    color: #7f8c8d;
+  }
+  .error {
+    background: #ffebee;
+    color: #c62828;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+  }
+  .sort-ind {
+    display: inline-block;
+    margin-left: 4px;
+    color: #1a237e;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+const toRows = (table) => {
+  const ids = table.id || [];
+  return ids.map((id, i) => {
+    const row = { id };
+    Object.keys(table).forEach(k => { if (k !== 'id') row[k] = table[k][i]; });
+    return row;
+  });
+};
+
+const fmtDate = (v) => {
+  if (!v) return '';
+  const d = typeof v === 'number' ? new Date(v * 1000) : new Date(v);
+  if (isNaN(d)) return String(v);
+  return d.toLocaleDateString('fr-FR');
+};
+
+const fmtVal = (v) => {
+  if (v === null || v === undefined || v === '') return '—';
+  if (typeof v === 'boolean') return v ? 'Oui' : 'Non';
+  return String(v);
+};
+
+function App() {
+  const [materiel, setMateriel] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [utilisateurs, setUtilisateurs] = useState([]);
+  const [affectations, setAffectations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState('');
+  const [filterCat, setFilterCat] = useState('');
+  const [filterUser, setFilterUser] = useState('');
+  const [sortKey, setSortKey] = useState('id');
+  const [sortDir, setSortDir] = useState('asc');
+
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const results = await Promise.allSettled([
+        grist.docApi.fetchTable('Materiel'),
+        grist.docApi.fetchTable('Categorie'),
+        grist.docApi.fetchTable('Utilisateur'),
+        grist.docApi.fetchTable('Affectation'),
+      ]);
+      setMateriel(results[0].status === 'fulfilled' ? toRows(results[0].value) : []);
+      setCategories(results[1].status === 'fulfilled' ? toRows(results[1].value) : []);
+      setUtilisateurs(results[2].status === 'fulfilled' ? toRows(results[2].value) : []);
+      setAffectations(results[3].status === 'fulfilled' ? toRows(results[3].value) : []);
+      const errors = results.filter(r => r.status === 'rejected');
+      if (errors.length === results.length) {
+        setError("Impossible de charger les tables. Vérifiez les permissions et les noms de tables.");
+      }
+    } catch (e) {
+      setError("Erreur : " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    grist.ready({ requiredAccess: 'full' });
+    grist.onRecords(() => { loadData(); });
+    loadData();
+  }, []);
+
+  // Indexes
+  const catIdx = useMemo(() => {
+    const m = {};
+    categories.forEach(c => { m[c.id] = c; });
+    return m;
+  }, [categories]);
+
+  const userIdx = useMemo(() => {
+    const m = {};
+    utilisateurs.forEach(u => { m[u.id] = u; });
+    return m;
+  }, [utilisateurs]);
+
+  const affByMateriel = useMemo(() => {
+    const m = {};
+    affectations.forEach(a => {
+      // Heuristique : retrouver le champ qui référence Materiel
+      const matKey = Object.keys(a).find(k => /materiel/i.test(k) && typeof a[k] === 'number');
+      if (matKey && a[matKey]) {
+        if (!m[a[matKey]]) m[a[matKey]] = [];
+        m[a[matKey]].push(a);
+      }
+    });
+    return m;
+  }, [affectations]);
+
+  // Détermine colonnes à afficher depuis Materiel
+  const columns = useMemo(() => {
+    if (materiel.length === 0) return [];
+    const first = materiel[0];
+    const keys = Object.keys(first).filter(k =>
+      k !== 'id' &&
+      !k.startsWith('gristHelper_') &&
+      !k.startsWith('manualSort')
+    );
+    return keys;
+  }, [materiel]);
+
+  const getCatName = (m) => {
+    // essaie de résoudre via champ ref catégorie
+    const refKey = Object.keys(m).find(k => /categ/i.test(k));
+    if (refKey) {
+      const v = m[refKey];
+      if (typeof v === 'number' && catIdx[v]) {
+        const c = catIdx[v];
+        return c.nom || c.name || c.libelle || c.titre || `Cat #${v}`;
+      }
+      if (typeof v === 'string') return v;
+    }
+    // fallback: chercher gristHelper_Display
+    if (m.gristHelper_Display) return m.gristHelper_Display;
+    return null;
+  };
+
+  const getAssignedUser = (m) => {
+    // 1) Via affectations
+    const affs = affByMateriel[m.id];
+    if (affs && affs.length > 0) {
+      // Prendre la plus récente (heuristique date)
+      const latest = affs[affs.length - 1];
+      const userKey = Object.keys(latest).find(k => /user|utilisat/i.test(k) && typeof latest[k] === 'number');
+      if (userKey && userIdx[latest[userKey]]) {
+        const u = userIdx[latest[userKey]];
+        return u.nom_complet || u.nom || u.name || u.email || `User #${u.id}`;
+      }
+    }
+    // 2) Ref directe sur Materiel
+    const userKey = Object.keys(m).find(k => /user|utilisat/i.test(k));
+    if (userKey) {
+      const v = m[userKey];
+      if (typeof v === 'number' && userIdx[v]) {
+        const u = userIdx[v];
+        return u.nom_complet || u.nom || u.name || u.email || `User #${v}`;
+      }
+      if (typeof v === 'string' && v) return v;
+    }
+    return null;
+  };
+
+  const filtered = useMemo(() => {
+    let rows = materiel;
+    if (search) {
+      const s = search.toLowerCase();
+      rows = rows.filter(m =>
+        Object.values(m).some(v =>
+          v !== null && v !== undefined && String(v).toLowerCase().includes(s)
+        )
+      );
+    }
+    if (filterCat) {
+      rows = rows.filter(m => {
+        const name = getCatName(m);
+        return name && String(name) === filterCat;
+      });
+    }
+    if (filterUser) {
+      rows = rows.filter(m => {
+        const u = getAssignedUser(m);
+        if (filterUser === '__none__') return !u;
+        if (filterUser === '__any__') return !!u;
+        return u === filterUser;
+      });
+    }
+    // Sort
+    rows = [...rows].sort((a, b) => {
+      let av = a[sortKey], bv = b[sortKey];
+      if (av === null || av === undefined) av = '';
+      if (bv === null || bv === undefined) bv = '';
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return sortDir === 'asc' ? av - bv : bv - av;
+      }
+      const cmp = String(av).localeCompare(String(bv), 'fr', { numeric: true });
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return rows;
+  }, [materiel, search, filterCat, filterUser, sortKey, sortDir, catIdx, userIdx, affByMateriel]);
+
+  const catOptions = useMemo(() => {
+    const s = new Set();
+    materiel.forEach(m => {
+      const n = getCatName(m);
+      if (n) s.add(String(n
