@@ -51,6 +51,11 @@ Génère un fichier HTML complet et autonome qui :
 5. Correspond aux écrans demandés : {spec.get('screens', '')}
 6. A un design propre avec CSS intégré
 
+CONTRAINTE CRITIQUE : ta réponse ne doit pas dépasser 3800 tokens.
+Pour rester dans cette limite : CSS minimal (pas de règles redondantes), JS sans commentaires,
+pas de bibliothèques externes inutiles, fonctionnalités essentielles seulement.
+Le fichier DOIT être syntaxiquement complet — ne jamais laisser une fonction ou balise ouverte.
+
 Réponds UNIQUEMENT avec le code HTML complet, sans bloc markdown ni explication."""
 
         message = client.messages.create(
@@ -76,12 +81,8 @@ Réponds UNIQUEMENT avec le code HTML complet, sans bloc markdown ni explication
 
 def ajouter_section_custom_widget(cur, widget_url, n_tables):
     """Ajoute une page 'Widget' avec une section custom dans le .grist."""
-    custom_def = json.dumps({
-        "url": widget_url,
-        "access": "full",
-        "widgetId": None,
-        "pluginId": ""
-    })
+    # Grist accepte l'URL en clair ou en JSON — on tente les deux formats
+    custom_def = widget_url  # format plain string (plus compatible)
 
     # IDs qui suivent les tables de données
     SECTIONS_PER_TABLE = 3
@@ -105,6 +106,12 @@ def ajouter_section_custom_widget(cur, widget_url, n_tables):
         "VALUES (?,0,?,'custom','Widget',100,1,?)",
         (section_id, view_id, custom_def)
     )
+
+    # Vérification — on relit ce qui a été stocké
+    cur.execute("SELECT customDef FROM _grist_Views_section WHERE id = ?", (section_id,))
+    row = cur.fetchone()
+    stored = row[0] if row else None
+    print(f"🔍 customDef stocké : '{stored[:80] if stored else 'VIDE!'}'")
 
     cur.execute("INSERT INTO _grist_Pages VALUES (?,?,0,?,0,'')", (page_id, view_id, n_tables + 1))
     cur.execute("INSERT INTO _grist_TabBar VALUES (?,?,?)", (page_id, view_id, n_tables + 1))
