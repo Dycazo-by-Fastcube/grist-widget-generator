@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Challenges Collaborateurs</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f5f7fa;
+    color: #1f2937;
+  }
+  .app {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #e5e7eb;
+  }
+  .header h1 {
+    margin: 0;
+    font-size: 24px;
+    color: #111827;
+  }
+  .user-badge {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    font-size: 14px;
+  }
+  .role-chip {
+    background: #6366f1;
+    color: white;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .role-chip.admin { background: #dc2626; }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .tab {
+    padding: 10px 18px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: #6b7280;
+    border-bottom: 3px solid transparent;
+    transition: all 0.2s;
+  }
+  .tab:hover { color: #111827; }
+  .tab.active {
+    color: #6366f1;
+    border-bottom-color: #6366f1;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: white;
+    padding: 18px;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .stat-card .label {
+    font-size: 12px;
+    color: #6b7280;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .stat-card .value {
+    font-size: 28px;
+    font-weight: 700;
+    color: #111827;
+    margin-top: 6px;
+  }
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: white;
+    padding: 18px;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  }
+  .card h3 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    color: #111827;
+  }
+  .card .meta {
+    font-size: 13px;
+    color: #6b7280;
+    margin-bottom: 8px;
+  }
+  .card .desc {
+    font-size: 14px;
+    color: #374151;
+    line-height: 1.5;
+  }
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    background: #e0e7ff;
+    color: #4338ca;
+  }
+  .badge.success { background: #d1fae5; color: #065f46; }
+  .badge.warn { background: #fef3c7; color: #92400e; }
+  table {
+    width: 100%;
+    background: white;
+    border-radius: 10px;
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  th {
+    background: #f9fafb;
+    text-align: left;
+    padding: 12px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #6b7280;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  td {
+    padding: 12px 16px;
+    font-size: 14px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #f9fafb; }
+  .empty {
+    text-align: center;
+    padding: 40px;
+    color: #9ca3af;
+    font-style: italic;
+  }
+  .loading {
+    text-align: center;
+    padding: 60px;
+    color: #6b7280;
+  }
+  .error {
+    background: #fee2e2;
+    color: #991b1b;
+    padding: 16px;
+    border-radius: 8px;
+    margin: 20px 0;
+  }
+  .podium {
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 16px;
+    margin: 30px 0;
+  }
+  .podium-place {
+    background: white;
+    border-radius: 10px;
+    padding: 16px;
+    text-align: center;
+    min-width: 140px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  }
+  .podium-place.rank-1 {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+    color: white;
+    min-height: 140px;
+  }
+  .podium-place.rank-2 {
+    background: linear-gradient(135deg, #d1d5db, #9ca3af);
+    color: white;
+    min-height: 120px;
+  }
+  .podium-place.rank-3 {
+    background: linear-gradient(135deg, #d97706, #b45309);
+    color: white;
+    min-height: 100px;
+  }
+  .podium-place .medal { font-size: 32px; }
+  .podium-place .name { font-weight: 700; font-size: 15px; margin: 6px 0; }
+  .podium-place .score { font-size: 20px; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+const toRows = (table) => {
+  const ids = table.id || [];
+  return ids.map((id, i) => {
+    const row = { id };
+    Object.keys(table).forEach(k => { if (k !== 'id') row[k] = table[k][i]; });
+    return row;
+  });
+};
+
+const safeFetch = async (name) => {
+  try {
+    return toRows(await grist.docApi.fetchTable(name));
+  } catch (e) {
+    console.warn('fetchTable failed:', name, e);
+    return [];
+  }
+};
+
+function App() {
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(null);
+  const [tab, setTab] = useState('dashboard');
+  const [me, setMe] = useState(null);
+  const [collabs, setCollabs] = useState([]);
+  const [challenges, setChallenges] = useState([]);
+  const [participations, setParticipations] = useState([]);
+  const [resultats, setResultats] = useState([]);
+
+  const load = async () => {
+    try {
+      const [c, ch, p, r] = await Promise.all([
+        safeFetch('Collaborateur'),
+        safeFetch('Challenge'),
+        safeFetch('Participation'),
+        safeFetch('Resultat'),
+      ]);
+      setCollabs(c);
+      setChallenges(ch);
+      setParticipations(p);
+      setResultats(r);
+      setLoaded(true);
+    } catch (e) {
+      setError(e.message || String(e));
+      setLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    grist.ready({ requiredAccess: 'full' });
+    grist.onRecords(async (records) => {
+      if (records && records[0]) {
+        setMe(records[0]);
+      }
+      await load();
+    });
+    grist.onRecord(async (record) => {
+      if (record) setMe(record);
+    });
+    // fallback initial load
+    setTimeout(() => { if (!loaded) load(); }, 800);
+  }, []);
+
+  const role = useMemo(() => {
+    if (!me) return 'collab';
+    if (me.role) return String(me.role).toLowerCase();
+    if (me.admin_rh || me.is_admin || me.admin) return 'admin';
+    return 'collab';
+  }, [me]);
+
+  const myEmail = me?.email || me?.Email || null;
+
+  const myCollab = useMemo(() => {
+    if (!myEmail) return null;
+    return collabs.find(c => (c.email || c.Email) === myEmail) || null;
+  }, [collabs, myEmail]);
+
+  const nameOf = (collabId) => {
+    const c = collabs.find(x => x.id === collabId);
+    if (!c) return `#${collabId}`;
+    return c.nom || c.name || c.nom_complet || c.email || `#${collabId}`;
+  };
+
+  const titleOf = (challengeId) => {
+    const c = challenges.find(x => x.id === challengeId);
+    if (!c) return `#${challengeId}`;
+    return c.titre || c.nom || c.name || `Challenge #${challengeId}`;
+  };
+
+  // Classement global basé sur Resultat
+  const leaderboard = useMemo(() => {
+    const scores = {};
+    resultats.forEach(r => {
+      const cid = r.collaborateur || r.collaborateur_id || r.Collaborateur;
+      const score = Number(r.score || r.points || r.valeur || 0);
+      if (!cid) return;
+      scores[cid] = (scores[cid] || 0) + score;
+    });
+    return Object.entries(scores)
+      .map(([cid, score]) => ({ collabId: Number(cid), score }))
+      .sort((a, b) => b.score - a.score);
+  }, [resultats]);
+
+  const myParticipations = useMemo(() => {
+    if (!myCollab) return [];
+    return participations.filter(p => {
+      const cid = p.collaborateur || p.collaborateur_id || p.Collaborateur;
+      return cid === myCollab.id;
+    });
+  }, [participations, myCollab]);
+
+  if (!loaded) {
+    return <div className="app"><div className="loading">Chargement...</div></div>;
+  }
+
+  return (
+    <div className="app">
+      <div className="header">
+        <h1>🏆 Challenges Collaborateurs</h1>
+        <div className="user-badge">
+          <span>{myCollab ? (myCollab.nom || myCollab.email) : (myEmail || 'Invité')}</span>
+          <span className={`role-chip ${role}`}>{role}</span>
+        </div>
+      </div>
+
+      {error && <div className="error">Erreur : {error}</div>}
+
+      <div className="tabs">
+        <button className={`tab ${tab==='dashboard'?'active':''}`} onClick={() => setTab('dashboard')}>Tableau de bord</button>
