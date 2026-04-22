@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Gestion des clés</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f6f9;color:#222;padding:16px}
+h1{font-size:20px;margin-bottom:12px;color:#1a3a6b}
+.tabs{display:flex;gap:4px;border-bottom:2px solid #dfe4ea;margin-bottom:16px}
+.tab{padding:8px 16px;cursor:pointer;border:none;background:none;font-size:14px;color:#555;border-bottom:2px solid transparent;margin-bottom:-2px}
+.tab.active{color:#1a3a6b;border-bottom-color:#1a3a6b;font-weight:600}
+.card{background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;margin-bottom:12px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+.stat{background:#fff;padding:12px;border-radius:8px;border-left:4px solid #1a3a6b}
+.stat .v{font-size:22px;font-weight:700;color:#1a3a6b}
+.stat .l{font-size:12px;color:#666;text-transform:uppercase}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px;background:#f0f3f8;color:#333;font-weight:600;border-bottom:1px solid #dfe4ea}
+td{padding:8px;border-bottom:1px solid #eef1f5}
+tr:hover td{background:#fafbfc}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.b-ok{background:#d4edda;color:#155724}
+.b-ko{background:#f8d7da;color:#721c24}
+.b-w{background:#fff3cd;color:#856404}
+.search{width:100%;padding:8px;border:1px solid #dfe4ea;border-radius:6px;margin-bottom:10px;font-size:13px}
+.role{display:inline-block;padding:3px 10px;background:#1a3a6b;color:#fff;border-radius:4px;font-size:11px;margin-left:8px}
+.role.emp{background:#6c757d}
+.empty{text-align:center;padding:24px;color:#888}
+.err{background:#f8d7da;color:#721c24;padding:10px;border-radius:6px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect}=React;
+
+const toRows=(t)=>{const ids=t.id||[];return ids.map((id,i)=>{const r={id};Object.keys(t).forEach(k=>{if(k!=='id')r[k]=t[k][i]});return r})};
+
+const fmtDate=(v)=>{if(!v)return '—';const d=typeof v==='number'?new Date(v*1000):new Date(v);return isNaN(d)?'—':d.toLocaleDateString('fr-FR')};
+
+const getLabel=(row,fields)=>{for(const f of fields){if(row&&row[f])return row[f]}return '—'};
+
+function App(){
+  const [tab,setTab]=useState('dashboard');
+  const [users,setUsers]=useState([]);
+  const [cles,setCles]=useState([]);
+  const [emprunts,setEmprunts]=useState([]);
+  const [locaux,setLocaux]=useState([]);
+  const [me,setMe]=useState(null);
+  const [err,setErr]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [q,setQ]=useState('');
+
+  const load=async()=>{
+    try{
+      const tables=['Utilisateur','Cle','Emprunt','Local'];
+      const results={};
+      for(const t of tables){
+        try{results[t]=toRows(await grist.docApi.fetchTable(t))}
+        catch(e){results[t]=[]}
+      }
+      setUsers(results.Utilisateur);
+      setCles(results.Cle);
+      setEmprunts(results.Emprunt);
+      setLocaux(results.Local);
+      setLoading(false);
+    }catch(e){setErr(e.message);setLoading(false)}
+  };
+
+  useEffect(()=>{
+    grist.ready({requiredAccess:'full'});
+    grist.onRecords(async(records)=>{
+      if(records&&records[0]){
+        const r=records[0];
+        setMe({email:r.email||r.Email,nom:r.nom||r.Nom||r.name,role:r.role||r.Role||'Employés'});
+      }
+      await load();
+    });
+    load();
+  },[]);
+
+  const isAdmin=me?.role==='Admin';
+  const empruntsActifs=emprunts.filter(e=>!e.date_restitution&&!e.dateRestitution&&!e.restitue);
+  const clesDisponibles=cles.length-empruntsActifs.length;
+
+  const getUserName=(id)=>{const u=users.find(x=>x.id===id);return u?getLabel(u,['nom','Nom','name','email']):`#${id}`};
+  const getCleName=(id)=>{const c=cles.find(x=>x.id===id);return c?getLabel(c,['nom','Nom','code','libelle','numero']):`#${id}`};
+  const getLocalName=(id)=>{const l=locaux.find(x=>x.id===id);return l?getLabel(l,['nom','Nom','name','libelle']):`#${id}`};
+
+  const isEmpruntee=(cleId)=>empruntsActifs.some(e=>(e.cle||e.Cle||e.cle_id)===cleId);
+
+  const filter=(arr,fields)=>{
+    if(!q)return arr;
+    const qq=q.toLowerCase();
+    return arr.filter(r=>fields.some(f=>String(r[f]||'').toLowerCase().includes(qq)));
+  };
+
+  if(loading)return <div className="card">Chargement…</div>;
+
+  return(
+    <div>
+      <h1>🔑 Gestion des clés
+        {me&&<span className={"role "+(isAdmin?'':'emp')}>{me.role}</span>}
+      </h1>
+      {err&&<div className="err">{err}</div>}
+
+      <div className="tabs">
+        <button className={"tab "+(tab==='dashboard'?'active':'')} onClick={()=>setTab('dashboard')}>Tableau de bord</button>
+        <button className={"tab "+(tab==='cles'?'active':'')} onClick={()=>setTab('cles')}>Clés ({cles.length})</button>
+        <button className={"tab "+(tab==='emprunts'?'active':'')} onClick={()=>setTab('emprunts')}>Emprunts ({emprunts.length})</button>
+        <button className={"tab "+(tab==='locaux'?'active':'')} onClick={()=>setTab('locaux')}>Locaux ({locaux.length})</button>
+        {isAdmin&&<button className={"tab "+(tab==='users'?'active':'')} onClick={()=>setTab('users')}>Utilisateurs ({users.length})</button>}
+      </div>
+
+      {tab==='dashboard'&&(
+        <div>
+          <div className="stats">
+            <div className="stat"><div className="v">{cles.length}</div><div className="l">Clés totales</div></div>
+            <div className="stat"><div className="v">{clesDisponibles}</div><div className="l">Disponibles</div></div>
+            <div className="stat"><div className="v">{empruntsActifs.length}</div><div className="l">En cours</div></div>
+            <div className="stat"><div className="v">{locaux.length}</div><div className="l">Locaux</div></div>
+          </div>
+          <div className="card">
+            <h3 style={{marginBottom:10,fontSize:15}}>Emprunts en cours</h3>
+            {empruntsActifs.length===0?<div className="empty">Aucun emprunt en cours</div>:(
+              <table><thead><tr><th>Clé</th><th>Utilisateur</th><th>Date emprunt</th></tr></thead>
+              <tbody>{empruntsActifs.slice(0,10).map(e=>(
+                <tr key={e.id}>
+                  <td>{e.gristHelper_Display||getCleName(e.cle||e.Cle||e.cle_id)}</td>
+                  <td>{e.gristHelper_Display2||getUserName(e.utilisateur||e.Utilisateur||e.user_id)}</td>
+                  <td>{fmtDate(e.date_emprunt||e.dateEmprunt||e.date)}</td>
+                </tr>))}</tbody></table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab==='cles'&&(
+        <div className="card">
+          <input className="search" placeholder="Rechercher une clé…" value={q} onChange={e=>setQ(e.target.value)}/>
+          {cles.length===0?<div className="empty">Aucune clé</div>:(
+            <table><thead><tr><th>Clé</th><th>Local</th><th>Statut</th></tr></thead>
+            <tbody>{filter(cles,['nom','Nom','code','libelle','numero']).map(c=>{
+              const dispo=!isEmpruntee(c.id);
+              return(<tr key={c.id}>
+                <td><strong>{getLabel(c,['nom','Nom','code','libelle','numero'])}</strong></td>
+                <td>{c.gristHelper_Display||getLocalName(c.local||c.Local||c.local_id)}</td>
+                <td><span className={"badge "+(dispo?'b-ok':'b-w')}>{dispo?'Disponible':'Empruntée'}</span></td>
+              </tr>)})}</tbody></table>
+          )}
+        </div>
+      )}
+
+      {tab==='emprunts'&&(
+        <div className="card">
+          <input className="search" placeholder="Rechercher…" value={q} onChange={e=>setQ(e.target.value)}/>
+          {emprunts.length===0?<div className="empty">Aucun emprunt</div>:(
+            <table><thead><tr><th>Clé</th><th>Utilisateur</th><th>Emprunt</th><th>Restitution</th><th>Statut</th></tr></thead>
+            <tbody>{emprunts.map(e=>{
+              const restit=e.date_restitution||e.dateRestitution;
+              const actif=!restit&&!e.restitue;
+              return(<tr key={e.id}>
+                <td>{e.gristHelper_Display||getCleName(e.cle||e.Cle||e.cle_id)}</td>
+                <td>{e.gristHelper_Display2||getUserName(e.utilisateur||e.Utilisateur||e.user_id)}</td>
+                <td>{fmtDate(e.date_emprunt||e.dateEmprunt||e.date)}</td>
+                <td>{fmtDate(restit)}</td>
+                <td><span className={"badge "+(actif?'b-w':'b-ok')}>{actif?'En cours':'Restitué'}</span></td>
+              </tr>)})}</tbody></table>
+          )}
+        </div>
+      )}
+
+      {tab==='locaux'&&(
+        <div
