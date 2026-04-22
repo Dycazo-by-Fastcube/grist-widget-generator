@@ -456,6 +456,21 @@
         const totalSteps = 5;
         let roles = [];
         let tables = [];
+
+        let formData = {
+            description: '',
+            roles: [],
+            userStories: {},
+            permissions: {},
+            screens: ''
+        };
+
+        function saveCurrentStepData() {
+            if (currentStep === 1) formData.description = document.getElementById('description').value.trim();
+            if (currentStep === 2) formData.roles = Array.from(document.querySelectorAll('#rolesList input')).map(i => i.value.trim()).filter(r => r);
+            if (currentStep === 3) roles.forEach(role => { const t = document.querySelector(`textarea[name="us_${role}"]`); if(t) formData.userStories[role] = t.value.trim(); });
+            if (currentStep === 5) formData.screens = document.getElementById('screens').value.trim();
+        }
         
         // Initialize with one empty role
         window.addEventListener('DOMContentLoaded', () => {
@@ -500,6 +515,7 @@
         }
         
         function nextStep() {
+            saveCurrentStepData();
             if (validateStep(currentStep)) {
                 if (currentStep === 2) {
                     roles = Array.from(document.querySelectorAll('#rolesList input'))
@@ -588,6 +604,7 @@
         }
         
         function prevStep() {
+            saveCurrentStepData();
             currentStep--;
             showStep(currentStep);
         }
@@ -738,16 +755,25 @@
             showStatus('loading', '⏳ Génération de votre widget en cours...');
             
             try {
-                // TODO: Appeler l'API backend
-                // Pour l'instant, juste simuler
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                showStatus('success', 
-                    '✅ Spécifications collectées !<br><br>' +
-                    'Prochaine étape : intégration Claude API pour générer le widget.<br><br>' +
-                    JSON.stringify(spec, null, 2).substring(0, 200) + '...'
+                const response = await fetch(EDGE_FUNCTION_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        nom_module: spec.description.split('.')[0].substring(0, 50),
+                        description: JSON.stringify(spec, null, 2),
+                        type_app: 'custom'
+                    })
+                });
+
+                if (!response.ok) throw new Error('Erreur API');
+
+                const result = await response.json();
+
+                showStatus('success',
+                    `✅ Demande créée !<br><br>` +
+                    `🔗 <a href="${result.issue_url}" target="_blank">Issue #${result.issue_number}</a>`
                 );
-                
+
             } catch (error) {
                 showStatus('error', `❌ Erreur : ${error.message}`);
             } finally {
