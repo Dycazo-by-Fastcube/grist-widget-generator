@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Générateur de widget Grist avec intégration des skills
+Générateur de widget Grist dynamique basé sur la spec JSON
 """
 
 import sqlite3
@@ -8,21 +8,42 @@ import shutil
 import sys
 import json
 import os
+import re
+
+
+def sanitize_table_id(name):
+    sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+    if sanitized and sanitized[0].isdigit():
+        sanitized = 'T_' + sanitized
+    return sanitized[:50] or 'Table'
+
 
 def generer_widget(nom_module, description, type_app, template_path, skills_path):
-    """
-    Génère un .grist personnalisé basé sur le formulaire
-    """
-    output_path = f"{nom_module.lower().replace(' ', '_')}.grist"
-    
-    # Copier le template
+    # Parse spec JSON transmis depuis le formulaire
+    try:
+        spec = json.loads(description)
+        tables_list = spec.get('tables', [])
+        roles = spec.get('roles', [])
+        permissions = spec.get('permissions', {})
+        desc_text = spec.get('description', nom_module)
+    except (json.JSONDecodeError, TypeError):
+        tables_list = []
+        roles = []
+        permissions = {}
+        desc_text = description
+
+    if not tables_list:
+        tables_list = ['Données']
+
+    output_name = re.sub(r'[^a-z0-9_]', '_', nom_module.lower())[:40]
+    output_path = f"{output_name}.grist"
+
     shutil.copy(template_path, output_path)
-    
     conn = sqlite3.connect(output_path)
-    c = conn.cursor()
-    
-    print(f"✅ Template chargé")
-    
+    cur = conn.cursor()
+
+    print("✅ Template chargé")
+
     # Charger les skills
     skills = {}
     if os.path.exists(skills_path):
@@ -31,173 +52,135 @@ def generer_widget(nom_module, description, type_app, template_path, skills_path
             if os.path.exists(skill_path):
                 with open(skill_path, 'r', encoding='utf-8') as f:
                     skills[skill_file] = f.read()
-                print(f"✅ Skill chargé: {skill_file}")
-    
-    # Supprimer Table1 du template
-    c.execute("DROP TABLE IF EXISTS Table1")
-    c.execute("DELETE FROM _grist_Tables WHERE tableId='Table1'")
-    c.execute("DELETE FROM _grist_Tables_column WHERE parentId=1")
-    c.execute("DELETE FROM _grist_Views WHERE name='Table1'")
-    c.execute("DELETE FROM _grist_Views_section WHERE tableRef=1")
-    c.execute("DELETE FROM _grist_Views_section_field WHERE parentId IN (1,2,3)")
-    c.execute("DELETE FROM _grist_Pages WHERE viewRef=1")
-    c.execute("DELETE FROM _grist_TabBar WHERE viewRef=1")
-    
-    print(f"✅ Template nettoyé")
-    
-    # Créer les tables métier
-    c.execute('''
-        CREATE TABLE Projets (
-            id INTEGER PRIMARY KEY,
-            nom TEXT NOT NULL,
-            description TEXT,
-            statut TEXT DEFAULT 'En cours',
-            responsable_email TEXT,
-            acl_viewers TEXT,
-            acl_editors TEXT,
-            acl_deleters TEXT,
-            manualSort NUMERIC
-        )
-    ''')
-    
-    c.execute('''
-        CREATE TABLE Taches (
-            id INTEGER PRIMARY KEY,
-            projet_id INTEGER,
-            titre TEXT NOT NULL,
-            statut TEXT DEFAULT 'A faire',
-            priorite TEXT DEFAULT 'Moyenne',
-            assignee_email TEXT,
-            acl_viewers TEXT,
-            acl_editors TEXT,
-            acl_deleters TEXT,
-            manualSort NUMERIC
-        )
-    ''')
-    
-    print(f"✅ Tables créées")
-    
-    # Métadonnées tables
-    c.execute("INSERT INTO _grist_Tables VALUES (1, 'Projets', 1, 0, 0, 2, 3)")
-    c.execute("INSERT INTO _grist_Tables VALUES (2, 'Taches', 4, 0, 0, 5, 6)")
-    
-    # Colonnes Projets
-    colonnes_projets = [
-        (1, 1, 1.0, 'manualSort', 'ManualSortPos', '', 0, '', ''),
-        (2, 1, 2.0, 'nom', 'Text', '', 0, '', 'Nom'),
-        (3, 1, 3.0, 'description', 'Text', '', 0, '', 'Description'),
-        (4, 1, 4.0, 'statut', 'Choice', '{"choices":["En cours","Terminé","Suspendu"]}', 0, '', 'Statut'),
-        (5, 1, 5.0, 'responsable_email', 'Text', '', 0, '', 'Responsable'),
-        (6, 1, 6.0, 'acl_viewers', 'Text', '', 1, '$responsable_email', 'ACL Viewers'),
-        (7, 1, 7.0, 'acl_editors', 'Text', '', 1, '$responsable_email', 'ACL Editors'),
-        (8, 1, 8.0, 'acl_deleters', 'Text', '', 1, '$responsable_email', 'ACL Deleters'),
-    ]
-    
-    for col in colonnes_projets:
-        c.execute('''
-            INSERT INTO _grist_Tables_column 
-            (id, parentId, parentPos, colId, type, widgetOptions, isFormula, formula, label)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', col)
-    
-    # Colonnes Taches
-    colonnes_taches = [
-        (9, 2, 1.0, 'manualSort', 'ManualSortPos', '', 0, '', ''),
-        (10, 2, 2.0, 'projet_id', 'Ref:Projets', '', 0, '', 'Projet'),
-        (11, 2, 3.0, 'titre', 'Text', '', 0, '', 'Titre'),
-        (12, 2, 4.0, 'statut', 'Choice', '{"choices":["A faire","En cours","Terminé"]}', 0, '', 'Statut'),
-        (13, 2, 5.0, 'priorite', 'Choice', '{"choices":["Basse","Moyenne","Haute"]}', 0, '', 'Priorité'),
-        (14, 2, 6.0, 'assignee_email', 'Text', '', 0, '', 'Assigné'),
-        (15, 2, 7.0, 'acl_viewers', 'Text', '', 1, '",".join(filter(None,[$projet_id.responsable_email,$assignee_email]))', 'ACL Viewers'),
-        (16, 2, 8.0, 'acl_editors', 'Text', '', 1, '",".join(filter(None,[$projet_id.responsable_email,$assignee_email]))', 'ACL Editors'),
-        (17, 2, 9.0, 'acl_deleters', 'Text', '', 1, '$projet_id.responsable_email', 'ACL Deleters'),
-    ]
-    
-    for col in colonnes_taches:
-        c.execute('''
-            INSERT INTO _grist_Tables_column 
-            (id, parentId, parentPos, colId, type, widgetOptions, isFormula, formula, label)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', col)
-    
-    # Vues
-    c.execute("INSERT INTO _grist_Views VALUES (1, 'Projets', 'raw_data', '')")
-    c.execute("INSERT INTO _grist_Views VALUES (4, 'Taches', 'raw_data', '')")
-    
-    # Sections
-    for section_id, table_ref, parent_id, parent_key in [
-        (1, 1, 1, 'record'), (2, 1, 0, 'record'), (3, 1, 0, 'single'),
-        (4, 2, 4, 'record'), (5, 2, 0, 'record'), (6, 2, 0, 'single')
-    ]:
-        c.execute(f'''
-            INSERT INTO _grist_Views_section 
-            (id, tableRef, parentId, parentKey, title, defaultWidth, borderWidth)
-            VALUES ({section_id}, {table_ref}, {parent_id}, '{parent_key}', '', 100, 1)
+                print(f"✅ Skill chargé : {skill_file}")
+
+    # Nettoyer Table1 du template
+    cur.execute("DROP TABLE IF EXISTS Table1")
+    cur.execute("DELETE FROM _grist_Tables WHERE tableId='Table1'")
+    cur.execute("DELETE FROM _grist_Tables_column WHERE parentId=1")
+    cur.execute("DELETE FROM _grist_Views WHERE name='Table1'")
+    cur.execute("DELETE FROM _grist_Views_section WHERE tableRef=1")
+    cur.execute("DELETE FROM _grist_Views_section_field WHERE parentId IN (1,2,3)")
+    cur.execute("DELETE FROM _grist_Pages WHERE viewRef=1")
+    cur.execute("DELETE FROM _grist_TabBar WHERE viewRef=1")
+
+    print("✅ Template nettoyé")
+
+    # Constantes de layout
+    SECTIONS_PER_TABLE = 3   # main, raw, card
+    COLS_PER_TABLE = 8       # manualSort + 4 data + 3 ACL
+    VISIBLE_COLS = 4         # nom, description, statut, responsable
+    SECTIONS_WITH_FIELDS = 2 # main + raw
+    FIELDS_PER_TABLE = VISIBLE_COLS * SECTIONS_WITH_FIELDS
+
+    for i, table_name in enumerate(tables_list):
+        table_ref  = i + 1
+        view_id    = i * SECTIONS_PER_TABLE + 1
+        main_sec   = view_id
+        raw_sec    = view_id + 1
+        card_sec   = view_id + 2
+        col_base   = i * COLS_PER_TABLE + 1
+        field_base = i * FIELDS_PER_TABLE + 1
+
+        table_id = sanitize_table_id(table_name)
+
+        # Créer la table SQL
+        cur.execute(f'''
+            CREATE TABLE IF NOT EXISTS "{table_id}" (
+                id INTEGER PRIMARY KEY,
+                nom TEXT,
+                description TEXT,
+                statut TEXT DEFAULT 'Actif',
+                responsable_email TEXT,
+                acl_viewers TEXT,
+                acl_editors TEXT,
+                acl_deleters TEXT,
+                manualSort NUMERIC
+            )
         ''')
-    
-    # Fields (colonnes visibles)
-    fields = [
-        # Section 1 (Projets)
-        (1, 1, 2), (2, 1, 3), (3, 1, 4), (4, 1, 5),
-        # Section 2 (Projets)
-        (5, 2, 2), (6, 2, 3), (7, 2, 4), (8, 2, 5),
-        # Section 4 (Taches)
-        (9, 4, 10), (10, 4, 11), (11, 4, 12), (12, 4, 13), (13, 4, 14),
-        # Section 5 (Taches)
-        (14, 5, 10), (15, 5, 11), (16, 5, 12), (17, 5, 13),
-    ]
-    
-    for field_id, parent_id, col_ref in fields:
-        c.execute(f'''
-            INSERT INTO _grist_Views_section_field (id, parentId, colRef, width)
-            VALUES ({field_id}, {parent_id}, {col_ref}, 0)
-        ''')
-    
-    # Pages
-    c.execute("INSERT INTO _grist_Pages VALUES (1, 1, 0, 1, 0, '')")
-    c.execute("INSERT INTO _grist_Pages VALUES (2, 4, 0, 2, 0, '')")
-    
-    # TabBar
-    c.execute("INSERT INTO _grist_TabBar VALUES (1, 1, 1)")
-    c.execute("INSERT INTO _grist_TabBar VALUES (2, 4, 2)")
-    
-    print(f"✅ Métadonnées configurées")
-    
-    # Données de démo
-    c.execute(f'''
-        INSERT INTO Projets (id, nom, description, statut, responsable_email, manualSort)
-        VALUES (1, '{nom_module}', '{description}', 'En cours', 'demo@example.com', 1)
-    ''')
-    
-    c.execute(f'''
-        INSERT INTO Taches (id, projet_id, titre, statut, priorite, assignee_email, manualSort)
-        VALUES 
-        (1, 1, 'Tâche exemple 1', 'A faire', 'Haute', 'demo@example.com', 1),
-        (2, 1, 'Tâche exemple 2', 'En cours', 'Moyenne', 'demo@example.com', 2)
-    ''')
-    
-    print(f"✅ Données de démo ajoutées")
-    
+
+        # Enregistrer dans _grist_Tables
+        cur.execute(
+            "INSERT INTO _grist_Tables VALUES (?, ?, ?, 0, 0, ?, ?)",
+            (table_ref, table_id, view_id, raw_sec, card_sec)
+        )
+
+        # Colonnes
+        acl_formula = '$responsable_email'
+        cols = [
+            (col_base,   table_ref, 1.0, 'manualSort',        'ManualSortPos', '',                                          0, '',           ''),
+            (col_base+1, table_ref, 2.0, 'nom',               'Text',          '',                                          0, '',           'Nom'),
+            (col_base+2, table_ref, 3.0, 'description',       'Text',          '',                                          0, '',           'Description'),
+            (col_base+3, table_ref, 4.0, 'statut',            'Choice',        '{"choices":["Actif","Inactif","Archivé"]}', 0, '',           'Statut'),
+            (col_base+4, table_ref, 5.0, 'responsable_email', 'Text',          '',                                          0, '',           'Responsable'),
+            (col_base+5, table_ref, 6.0, 'acl_viewers',       'Text',          '',                                          1, acl_formula,  'ACL Viewers'),
+            (col_base+6, table_ref, 7.0, 'acl_editors',       'Text',          '',                                          1, acl_formula,  'ACL Editors'),
+            (col_base+7, table_ref, 8.0, 'acl_deleters',      'Text',          '',                                          1, acl_formula,  'ACL Deleters'),
+        ]
+        for col in cols:
+            cur.execute(
+                'INSERT INTO _grist_Tables_column (id, parentId, parentPos, colId, type, widgetOptions, isFormula, formula, label) VALUES (?,?,?,?,?,?,?,?,?)',
+                col
+            )
+
+        # Vue
+        cur.execute("INSERT INTO _grist_Views VALUES (?, ?, 'raw_data', '')", (view_id, table_name))
+
+        # Sections
+        for sid, pid, pkey in [
+            (main_sec,  view_id, 'record'),
+            (raw_sec,   0,       'record'),
+            (card_sec,  0,       'single'),
+        ]:
+            cur.execute(
+                "INSERT INTO _grist_Views_section (id, tableRef, parentId, parentKey, title, defaultWidth, borderWidth) VALUES (?,?,?,?,?,?,?)",
+                (sid, table_ref, pid, pkey, '', 100, 1)
+            )
+
+        # Fields visibles (nom, description, statut, responsable) × 2 sections
+        visible_col_refs = [col_base+1, col_base+2, col_base+3, col_base+4]
+        fid = field_base
+        for section_id in [main_sec, raw_sec]:
+            for col_ref in visible_col_refs:
+                cur.execute(
+                    "INSERT INTO _grist_Views_section_field (id, parentId, colRef, width) VALUES (?,?,?,?)",
+                    (fid, section_id, col_ref, 0)
+                )
+                fid += 1
+
+        # Page et onglet
+        cur.execute("INSERT INTO _grist_Pages VALUES (?,?,0,?,0,'')", (table_ref, view_id, i + 1))
+        cur.execute("INSERT INTO _grist_TabBar VALUES (?,?,?)", (table_ref, view_id, i + 1))
+
+        # Donnée de démo
+        cur.execute(
+            f'INSERT INTO "{table_id}" (id, nom, description, statut, responsable_email, manualSort) VALUES (1, ?, ?, ?, ?, 1)',
+            (f'Exemple {table_name}', 'Description exemple', 'Actif', 'demo@example.com')
+        )
+
+        print(f"✅ Table créée : {table_name} → {table_id}")
+
     conn.commit()
     conn.close()
-    
+
     print(f"\n🎉 Fichier généré : {output_path}")
     print(f"📊 Module : {nom_module}")
-    print(f"📝 Description : {description}")
-    print(f"🎨 Type : {type_app}")
+    print(f"📋 Tables : {', '.join(tables_list)}")
+    print(f"👥 Rôles : {', '.join(roles)}")
     print(f"📚 Skills chargés : {len(skills)}")
-    
+
     return output_path
+
 
 if __name__ == '__main__':
     if len(sys.argv) < 4:
-        print("Usage: python generate.py <nom_module> <description> <type_app> [template_path] [skills_path]")
+        print("Usage: python generate.py <nom_module> <description_json> <type_app> [template_path] [skills_path]")
         sys.exit(1)
-    
-    nom_module = sys.argv[1]
-    description = sys.argv[2]
-    type_app = sys.argv[3]
+
+    nom_module    = sys.argv[1]
+    description   = sys.argv[2]
+    type_app      = sys.argv[3]
     template_path = sys.argv[4] if len(sys.argv) > 4 else 'Document_sans_titre.grist'
-    skills_path = sys.argv[5] if len(sys.argv) > 5 else 'skills'
-    
+    skills_path   = sys.argv[5] if len(sys.argv) > 5 else 'skills'
+
     generer_widget(nom_module, description, type_app, template_path, skills_path)
