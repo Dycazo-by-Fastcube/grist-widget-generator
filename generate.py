@@ -58,13 +58,27 @@ Le fichier DOIT être syntaxiquement complet — ne jamais laisser une fonction 
 
 Réponds UNIQUEMENT avec le code HTML complet, sans bloc markdown ni explication."""
 
-        message = client.messages.create(
-            model="claude-opus-4-7",
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}]
-        )
+        messages = [{"role": "user", "content": prompt}]
+        html = ""
 
-        html = message.content[0].text.strip()
+        for attempt in range(3):
+            message = client.messages.create(
+                model="claude-opus-4-7",
+                max_tokens=4096,
+                messages=messages
+            )
+            chunk = message.content[0].text
+            html += chunk
+            print(f"✅ Chunk {attempt + 1} reçu ({len(chunk)} chars), stop_reason={message.stop_reason}")
+
+            if message.stop_reason != 'max_tokens':
+                break
+
+            # Tronqué : demander la suite
+            messages.append({"role": "assistant", "content": chunk})
+            messages.append({"role": "user", "content": "Continue exactement où tu t'es arrêté. Ne répète aucune ligne déjà écrite. Termine jusqu'à </html>."})
+
+        html = html.strip()
         if html.startswith("```"):
             html = re.sub(r'^```[a-z]*\n?', '', html)
             html = re.sub(r'\n?```$', '', html)
