@@ -52,7 +52,7 @@ Reçoit la spec JSON (via fichier temporaire), effectue trois opérations dans l
 Génère les colonnes adaptées à chaque table en fonction du besoin exprimé. Produit un JSON `{NomTable: [{colId, type, label, choices}]}`.
 
 **b) Création du `.grist`** — manipulation SQLite directe
-Copie un template `.grist`, crée les tables et métadonnées Grist avec les colonnes générées. Le fichier `.grist` est un SQLite avec des tables de métadonnées (`_grist_Tables`, `_grist_Views`, `_grist_Views_section`, etc.).
+Copie `default.grist` (template validé via UI Grist), vide entièrement toutes les tables de métadonnées, puis recrée tables et métadonnées avec les colonnes générées. Le fichier `.grist` est un SQLite avec des tables de métadonnées (`_grist_Tables`, `_grist_Views`, `_grist_Views_section`, etc.).
 
 **c) Génération du widget HTML** — appel Claude API (`claude-opus-4-7`, max_tokens=4096)
 Génère un widget HTML/JS autonome utilisant l'API `grist-plugin-api.js`. Si la réponse est tronquée (`stop_reason=max_tokens`), des appels de continuation sont effectués automatiquement (jusqu'à 3 fois).
@@ -63,7 +63,7 @@ Le `widget.html` est committé dans `widgets/{slug}/index.html` et servi par Git
 ```
 https://{owner}.github.io/grist-widget-generator/widgets/{slug}/
 ```
-Cette URL est stockée dans le champ `customDef` de la section custom widget du `.grist`.
+Cette URL est stockée dans la colonne `options` de la section custom widget du `.grist`, dans le champ `customView.url`.
 
 ## Secrets requis
 
@@ -83,7 +83,7 @@ grist-widget-generator/
 │   ├── create-issue.ts     # Endpoint Vercel : crée l'issue GitHub
 │   └── analyze-spec.ts     # Endpoint Vercel : analyse le besoin → tables
 ├── generate.py             # Générateur principal .grist + widget
-├── Document_sans_titre.grist  # Template Grist de base
+├── default.grist           # Template Grist de base (créé via UI, structure custom widget validée)
 ├── widgets/                # Widgets HTML générés (servis par GitHub Pages)
 │   └── {slug}/
 │       └── index.html
@@ -106,11 +106,23 @@ run: |
   python3 generate.py ... "/tmp/spec_body.txt"
 ```
 
-### Schéma SQLite Grist
+### Schéma SQLite Grist — section custom widget
 
-- La colonne `customDef` dans `_grist_Views_section` peut être absente des anciens templates → vérifier avec `PRAGMA table_info()` et ajouter avec `ALTER TABLE` si nécessaire
+La section custom widget nécessite une structure précise dans le `.grist` :
+
+- **Template** : utiliser `default.grist` (contient la colonne `options` dans `_grist_Views_section`). Faire un cleanup complet de toutes les tables méta avant de reconstruire.
+- **Colonne `options`** (pas `customDef`) dans `_grist_Views_section` : contient un JSON avec `customView` sérialisé :
+  ```json
+  { "verticalGridlines": true, "horizontalGridlines": true, "zebraStripes": false,
+    "customView": "{\"mode\":\"url\",\"url\":\"https://...\",\"access\":\"full\",...}",
+    "numFrozen": 0 }
+  ```
+- **Type de vue** : `_grist_Views.type = 'raw_data'` (pas `'custom'`)
+- **`layoutSpec`** obligatoire : `{"children":[{"leaf":SECTION_ID}],"collapsed":[]}` dans `_grist_Views`
+- **Field** obligatoire : au moins 1 entrée dans `_grist_Views_section_field` pour la section custom
+- **`parentId`** : sections raw/card ont `parentId=0` ; seule la section affichée dans la page a `parentId=view_id`
 - Les `data:` URI sont bloqués dans les iframes Grist (CSP) → héberger le widget sur GitHub Pages
-- Les IDs Grist doivent suivre la formule : `view_id = i * 3 + 1` (3 sections par table)
+- IDs : `view_id = i * 3 + 1` (3 sections par table) ; vue widget = `n_tables * 3 + 1`
 
 ### Génération de code avec Claude API
 

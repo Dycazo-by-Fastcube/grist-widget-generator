@@ -38,9 +38,24 @@ run: |
 
 ## Pièges connus — Schéma SQLite Grist
 
-- **`customDef` absent** : vérifier avec `PRAGMA table_info(_grist_Views_section)` et ajouter via `ALTER TABLE ... ADD COLUMN customDef TEXT DEFAULT ''` si nécessaire
-- **`data:` URI bloqué** : Grist bloque les URI `data:text/html;base64,...` en iframe — héberger sur GitHub Pages et référencer l'URL https dans `customDef`
-- **Calcul des IDs** : `table_ref = i+1`, `view_id = i*3+1`, sections = `view_id`, `view_id+1`, `view_id+2` — utiliser des compteurs globaux pour `col_id` et `field_id`, pas d'offsets fixes
+- **Template** : utiliser `default.grist` (validé via UI Grist, contient les bonnes colonnes de schéma). Faire un cleanup complet de toutes les tables méta (`_grist_Tables`, `_grist_Views`, `_grist_Views_section`, `_grist_Views_section_field`, `_grist_Pages`, `_grist_TabBar`) avant de reconstruire.
+- **Section custom widget** : stocker l'URL dans la colonne `options` de `_grist_Views_section` (pas `customDef`), avec le JSON imbriqué suivant :
+  ```python
+  options = json.dumps({
+      "verticalGridlines": True, "horizontalGridlines": True, "zebraStripes": False,
+      "customView": json.dumps({"mode": "url", "url": widget_url, "access": "full",
+                                "widgetDef": None, "pluginId": "", "sectionId": "",
+                                "renderAfterReady": False, "widgetId": None,
+                                "widgetOptions": None, "columnsMapping": None}),
+      "numFrozen": 0
+  })
+  ```
+- **Type de vue** : `_grist_Views.type` doit être `'raw_data'` (pas `'custom'`) pour la vue widget
+- **`layoutSpec` obligatoire** : `_grist_Views.layoutSpec = {"children":[{"leaf":SECTION_ID}],"collapsed":[]}` — sans ça Grist ne sait pas quelle section afficher
+- **Field obligatoire** : la section custom doit avoir au moins 1 entrée dans `_grist_Views_section_field` pointant vers une colonne visible, sinon la section est considérée vide
+- **`parentId` des sections** : raw (`record`) et card (`single`) ont `parentId=0` ; seule la section affichée dans la page a `parentId=view_id`
+- **`data:` URI bloqué** : Grist bloque les URI `data:text/html;base64,...` en iframe — héberger sur GitHub Pages et référencer l'URL https
+- **Calcul des IDs** : `table_ref = i+1`, `view_id = i*3+1`, sections = `view_id`, `view_id+1`, `view_id+2` ; vue widget = `n_tables*3+1` — utiliser des compteurs globaux pour `col_id` et `field_id`
 - **Colonnes** : ne pas créer les mêmes colonnes génériques pour toutes les tables — appeler Claude API (`generer_schema_tables`) pour obtenir les colonnes adaptées à chaque table AVANT de créer le .grist
 
 ## Pièges connus — Appels Claude API dans generate.py
