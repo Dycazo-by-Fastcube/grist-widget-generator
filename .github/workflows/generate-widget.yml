@@ -31,20 +31,21 @@ jobs:
       # 3. Parser l'issue pour extraire les données
       - name: Parser issue
         id: parse
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          echo "nom_module=${{ github.event.issue.title }}" >> $GITHUB_OUTPUT
-          
-          BODY="${{ github.event.issue.body }}"
-          
+          echo "nom_module=$ISSUE_TITLE" >> $GITHUB_OUTPUT
+
           # Extraire la description (tout ce qui suit "Description :" jusqu'à la ligne vide)
-          DESC=$(echo "$BODY" | sed -n '/Description :/,/^$/p' | sed '1d;$d' | tr -d '\n' | xargs)
+          DESC=$(echo "$ISSUE_BODY" | sed -n '/Description :/,/^$/p' | sed '1d;$d' | tr -d '\n' | xargs)
           echo "description=${DESC:-Application de gestion}" >> $GITHUB_OUTPUT
-          
-          # Extraire le type (tout ce qui suit "Type :" jusqu'à la ligne vide)  
-          TYPE=$(echo "$BODY" | sed -n '/Type :/,/^$/p' | sed '1d;$d' | tr -d '\n' | xargs)
+
+          # Extraire le type (tout ce qui suit "Type :" jusqu'à la ligne vide)
+          TYPE=$(echo "$ISSUE_BODY" | sed -n '/Type :/,/^$/p' | sed '1d;$d' | tr -d '\n' | xargs)
           echo "type_app=${TYPE:-liste}" >> $GITHUB_OUTPUT
-          
-          echo "Parsed - Nom: ${{ github.event.issue.title }}"
+
+          echo "Parsed - Nom: $ISSUE_TITLE"
           echo "Parsed - Description: $DESC"
           echo "Parsed - Type: $TYPE"
       
