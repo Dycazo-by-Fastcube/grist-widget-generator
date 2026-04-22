@@ -3,15 +3,10 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-interface UserStory {
-  action: string;
-  benefit: string;
-}
-
 interface RequestBody {
   description: string;
   roles: string[];
-  userStories: { [role: string]: string | UserStory[] };
+  userStories: { [role: string]: string };
 }
 
 export default async function handler(
@@ -48,17 +43,7 @@ export default async function handler(
 
     // Build prompt for Claude
     const userStoriesText = Object.entries(userStories)
-      .map(([role, stories]) => {
-        let content = '';
-        if (Array.isArray(stories)) {
-          content = stories
-            .map(s => `- En tant que ${role}, je peux "${s.action}", afin de "${s.benefit}"`)
-            .join('\n');
-        } else {
-          content = String(stories);
-        }
-        return `**${role}:**\n${content}`;
-      })
+      .map(([role, stories]) => `**${role}:**\n${stories}`)
       .join('\n\n');
 
     const prompt = `Tu es un expert en conception d'applications métier et bases de données.

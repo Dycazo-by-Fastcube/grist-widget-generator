@@ -350,22 +350,6 @@
             margin-bottom: 12px;
             font-size: 16px;
         }
-
-        .us-block {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 12px;
-            background: white;
-            padding: 10px;
-            border-radius: 6px;
-            border: 1px solid #e0e0e0;
-        }
-        
-        .us-block input {
-            flex: 1;
-            margin-bottom: 0 !important;
-        }
     </style>
 </head>
 <body>
@@ -484,7 +468,7 @@
         function saveCurrentStepData() {
             if (currentStep === 1) formData.description = document.getElementById('description').value.trim();
             if (currentStep === 2) formData.roles = Array.from(document.querySelectorAll('#rolesList input')).map(i => i.value.trim()).filter(r => r);
-            // Pour l'étape 3, les données sont déjà mises à jour via updateStoryAction/Benefit
+            if (currentStep === 3) roles.forEach(role => { const t = document.querySelector(`textarea[name="us_${role}"]`); if(t) formData.userStories[role] = t.value.trim(); });
             if (currentStep === 5) formData.screens = document.getElementById('screens').value.trim();
         }
         
@@ -542,12 +526,6 @@
                         alert('Veuillez ajouter au moins un rôle');
                         return;
                     }
-                    // Initialiser les tableaux d'US pour les nouveaux rôles
-                    roles.forEach(role => {
-                        if (!formData.userStories[role]) {
-                            formData.userStories[role] = [{ action: '', benefit: '' }];
-                        }
-                    });
                 }
                 
                 // Appel API Claude avant Step 4
@@ -570,10 +548,17 @@
             nextBtn.textContent = 'Analyse en cours...';
             
             try {
+                // Collect user stories
+                const userStories = {};
+                roles.forEach(role => {
+                    const textarea = document.querySelector(`textarea[name="us_${role}"]`);
+                    userStories[role] = textarea ? textarea.value.trim() : '';
+                });
+                
                 const spec = {
                     description: document.getElementById('description').value.trim(),
                     roles: roles,
-                    userStories: formData.userStories
+                    userStories: userStories
                 };
                 
                 const response = await fetch(ANALYZE_API_URL, {
@@ -663,12 +648,8 @@
             container.innerHTML = '';
             
             roles.forEach(role => {
-            roles.forEach((role) => {
                 const section = document.createElement('div');
                 section.className = 'role-section';
-                
-                const stories = formData.userStories[role] || [{ action: '', benefit: '' }];
-                
                 section.innerHTML = `
                     <h4>${role}</h4>
                     <textarea 
@@ -676,37 +657,9 @@
                         placeholder="Ex: En tant que ${role}, je peux créer un entretien, consulter l'historique, éditer les objectifs..."
                         style="width: 100%; min-height: 100px; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px;"
                     ></textarea>
-                    <div id="stories-list-${role}">
-                        ${stories.map((s, i) => `
-                            <div class="us-block">
-                                <span style="font-size: 13px; white-space: nowrap;">En tant que <b>${role}</b>, je peux</span>
-                                <input type="text" placeholder="action..." value="${s.action}" oninput="updateStory('${role}', ${i}, 'action', this.value)">
-                                <span style="font-size: 13px;">afin de</span>
-                                <input type="text" placeholder="bénéfice..." value="${s.benefit}" oninput="updateStory('${role}', ${i}, 'benefit', this.value)">
-                                <button type="button" class="remove-btn" onclick="removeStory('${role}', ${i})">✕</button>
-                            </div>
-                        `).join('')}
-                    </div>
-                    <button type="button" class="add-btn" style="padding: 6px; font-size: 12px;" onclick="addStory('${role}')">+ Ajouter une action pour ${role}</button>
                 `;
                 container.appendChild(section);
             });
-        }
-
-        function updateStory(role, index, field, value) {
-            formData.userStories[role][index][field] = value;
-        }
-
-        function addStory(role) {
-            if (!formData.userStories[role]) formData.userStories[role] = [];
-            formData.userStories[role].push({ action: '', benefit: '' });
-            generateUserStoriesFields();
-        }
-
-        function removeStory(role, index) {
-            formData.userStories[role].splice(index, 1);
-            if (formData.userStories[role].length === 0) formData.userStories[role].push({ action: '', benefit: '' });
-            generateUserStoriesFields();
         }
         
         function generatePermissionsFields() {
@@ -780,6 +733,12 @@
                 permissions: {},
                 screens: document.getElementById('screens').value.trim()
             };
+            
+            // User stories
+            roles.forEach(role => {
+                const textarea = document.querySelector(`textarea[name="us_${role}"]`);
+                spec.userStories[role] = textarea ? textarea.value.trim() : '';
+            });
             
             // Permissions (nouvelle structure : par table et par rôle)
             tables.forEach(table => {
