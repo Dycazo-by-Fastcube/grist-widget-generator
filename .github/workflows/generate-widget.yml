@@ -51,11 +51,15 @@ jobs:
       
       # 4. Générer le .grist
       - name: Générer widget
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
+          printf '%s' "$ISSUE_BODY" > /tmp/spec_body.txt
           python3 generate.py \
-            "${{ steps.parse.outputs.nom_module }}" \
-            "${{ steps.parse.outputs.description }}" \
-            "${{ steps.parse.outputs.type_app }}" \
+            "$ISSUE_TITLE" \
+            "/tmp/spec_body.txt" \
+            "custom" \
             "Document_sans_titre.grist" \
             "skills-repo/01-skills-universels"
       

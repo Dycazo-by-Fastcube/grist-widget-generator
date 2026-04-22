@@ -19,18 +19,29 @@ def sanitize_table_id(name):
 
 
 def generer_widget(nom_module, description, type_app, template_path, skills_path):
-    # Parse spec JSON transmis depuis le formulaire
+    # Lire depuis un fichier si description est un chemin
+    if os.path.isfile(description):
+        with open(description, 'r', encoding='utf-8') as f:
+            raw = f.read()
+    else:
+        raw = description
+
+    # Extraire le JSON depuis le body (qui peut contenir "**Description :** {...}")
     try:
-        spec = json.loads(description)
+        start = raw.index('{')
+        end = raw.rindex('}') + 1
+        spec = json.loads(raw[start:end])
         tables_list = spec.get('tables', [])
         roles = spec.get('roles', [])
         permissions = spec.get('permissions', {})
         desc_text = spec.get('description', nom_module)
-    except (json.JSONDecodeError, TypeError):
+        print(f"✅ Spec JSON parsée : {len(tables_list)} tables, {len(roles)} rôles")
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"⚠️  Impossible de parser le JSON ({e}), fallback générique")
         tables_list = []
         roles = []
         permissions = {}
-        desc_text = description
+        desc_text = raw
 
     if not tables_list:
         tables_list = ['Données']
