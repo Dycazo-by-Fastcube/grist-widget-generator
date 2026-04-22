@@ -49,11 +49,26 @@ jobs:
           echo "Parsed - Description: $DESC"
           echo "Parsed - Type: $TYPE"
       
-      # 4. Générer le .grist
+      # 4. Déboguer le chemin des skills
+      - name: Déboguer skills
+        run: |
+          echo "=== Contenu de skills-repo/ ==="
+          ls -la skills-repo/ || echo "skills-repo/ introuvable"
+          echo "=== Sous-dossiers ==="
+          find skills-repo/ -type d | head -20 || echo "Aucun dossier trouvé"
+          echo "=== Fichiers .md ==="
+          find skills-repo/ -name "*.md" | head -20 || echo "Aucun .md trouvé"
+
+      # 5. Installer dépendances Python
+      - name: Installer dépendances
+        run: pip install anthropic
+
+      # 6. Générer le .grist
       - name: Générer widget
         env:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           printf '%s' "$ISSUE_BODY" > /tmp/spec_body.txt
           python3 generate.py \
