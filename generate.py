@@ -95,22 +95,16 @@ def ajouter_section_custom_widget(cur, widget_url, n_tables):
 
     cur.execute("INSERT INTO _grist_Views VALUES (?, 'Widget', 'custom', '')", (view_id,))
 
-    if 'customDef' in col_names:
-        cur.execute(
-            "INSERT INTO _grist_Views_section "
-            "(id, tableRef, parentId, parentKey, title, defaultWidth, borderWidth, customDef) "
-            "VALUES (?,0,?,'custom','Widget',100,1,?)",
-            (section_id, view_id, custom_def)
-        )
-    else:
-        # Schéma plus ancien sans customDef
-        cur.execute(
-            "INSERT INTO _grist_Views_section "
-            "(id, tableRef, parentId, parentKey, title, defaultWidth, borderWidth) "
-            "VALUES (?,0,?,'custom','Widget',100,1)",
-            (section_id, view_id)
-        )
-        print("⚠️  Colonne customDef absente du schéma, URL widget non stockée")
+    if 'customDef' not in col_names:
+        cur.execute("ALTER TABLE _grist_Views_section ADD COLUMN customDef TEXT DEFAULT ''")
+        print("✅ Colonne customDef ajoutée au schéma")
+
+    cur.execute(
+        "INSERT INTO _grist_Views_section "
+        "(id, tableRef, parentId, parentKey, title, defaultWidth, borderWidth, customDef) "
+        "VALUES (?,0,?,'custom','Widget',100,1,?)",
+        (section_id, view_id, custom_def)
+    )
 
     cur.execute("INSERT INTO _grist_Pages VALUES (?,?,0,?,0,'')", (page_id, view_id, n_tables + 1))
     cur.execute("INSERT INTO _grist_TabBar VALUES (?,?,?)", (page_id, view_id, n_tables + 1))
