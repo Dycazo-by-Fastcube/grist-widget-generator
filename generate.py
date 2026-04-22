@@ -9,7 +9,6 @@ import sys
 import json
 import os
 import re
-import base64
 
 
 def sanitize_table_id(name):
@@ -20,7 +19,7 @@ def sanitize_table_id(name):
 
 
 def generer_code_widget(spec, skills):
-    """Appel Claude API pour générer le HTML/JS du widget."""
+    """Appel Claude API pour générer le HTML/JS du widget, sauvegardé dans widget.html."""
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
         print("⚠️  ANTHROPIC_API_KEY absent, widget HTML non généré")
@@ -61,11 +60,13 @@ Réponds UNIQUEMENT avec le code HTML complet, sans bloc markdown ni explication
         )
 
         html = message.content[0].text.strip()
-        # Nettoyer les éventuels blocs markdown
         if html.startswith("```"):
             html = re.sub(r'^```[a-z]*\n?', '', html)
             html = re.sub(r'\n?```$', '', html)
-        print(f"✅ Code widget généré ({len(html)} caractères)")
+
+        with open('widget.html', 'w', encoding='utf-8') as f:
+            f.write(html)
+        print(f"✅ Code widget généré et sauvegardé dans widget.html ({len(html)} caractères)")
         return html
 
     except Exception as e:
@@ -73,10 +74,8 @@ Réponds UNIQUEMENT avec le code HTML complet, sans bloc markdown ni explication
         return None
 
 
-def ajouter_section_custom_widget(cur, widget_html, n_tables):
+def ajouter_section_custom_widget(cur, widget_url, n_tables):
     """Ajoute une page 'Widget' avec une section custom dans le .grist."""
-    encoded   = base64.b64encode(widget_html.encode('utf-8')).decode('ascii')
-    widget_url = f"data:text/html;base64,{encoded}"
     custom_def = json.dumps({
         "url": widget_url,
         "access": "full",
@@ -118,7 +117,7 @@ def ajouter_section_custom_widget(cur, widget_html, n_tables):
     print(f"✅ Page widget custom ajoutée (view_id={view_id})")
 
 
-def generer_widget(nom_module, description, type_app, template_path, skills_path):
+def generer_widget(nom_module, description, type_app, template_path, skills_path, widget_url=None):
     # Lire depuis un fichier si description est un chemin
     if os.path.isfile(description):
         with open(description, 'r', encoding='utf-8') as f:
@@ -263,8 +262,8 @@ def generer_widget(nom_module, description, type_app, template_path, skills_path
 
     # Générer le code widget via Claude et l'intégrer
     widget_html = generer_code_widget(spec, skills)
-    if widget_html:
-        ajouter_section_custom_widget(cur, widget_html, len(tables_list))
+    if widget_html and widget_url:
+        ajouter_section_custom_widget(cur, widget_url, len(tables_list))
 
     conn.commit()
     conn.close()
@@ -288,5 +287,6 @@ if __name__ == '__main__':
     type_app      = sys.argv[3]
     template_path = sys.argv[4] if len(sys.argv) > 4 else 'Document_sans_titre.grist'
     skills_path   = sys.argv[5] if len(sys.argv) > 5 else 'skills'
+    widget_url    = sys.argv[6] if len(sys.argv) > 6 else None
 
-    generer_widget(nom_module, description, type_app, template_path, skills_path)
+    generer_widget(nom_module, description, type_app, template_path, skills_path, widget_url)

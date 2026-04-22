@@ -6,64 +6,43 @@ on:
 
 jobs:
   generate-widget:
-    # Uniquement pour les issues avec le label widget-generation
     if: contains(github.event.issue.labels.*.name, 'widget-generation')
     runs-on: ubuntu-latest
 
     permissions:
       contents: write
       issues: write
-      actions: write
-    
+
     steps:
       # 1. Checkout du repo public
       - name: Checkout repo public
         uses: actions/checkout@v4
-      
+
       # 2. Checkout du repo privé avec les skills
       - name: Checkout skills privés
         uses: actions/checkout@v4
         with:
-          repository: Dycazo-by-Fastcube/fastc-internal-tools  # ← CHANGE TON_USERNAME
+          repository: Dycazo-by-Fastcube/fastc-internal-tools
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: skills-repo
-      
-      # 3. Parser l'issue pour extraire les données
-      - name: Parser issue
-        id: parse
-        env:
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
-        run: |
-          echo "nom_module=$ISSUE_TITLE" >> $GITHUB_OUTPUT
 
-          # Extraire la description (tout ce qui suit "Description :" jusqu'à la ligne vide)
-          DESC=$(echo "$ISSUE_BODY" | sed -n '/Description :/,/^$/p' | sed '1d;$d' | tr -d '\n' | xargs)
-          echo "description=${DESC:-Application de gestion}" >> $GITHUB_OUTPUT
-
-          # Extraire le type (tout ce qui suit "Type :" jusqu'à la ligne vide)
-          TYPE=$(echo "$ISSUE_BODY" | sed -n '/Type :/,/^$/p' | sed '1d;$d' | tr -d '\n' | xargs)
-          echo "type_app=${TYPE:-liste}" >> $GITHUB_OUTPUT
-
-          echo "Parsed - Nom: $ISSUE_TITLE"
-          echo "Parsed - Description: $DESC"
-          echo "Parsed - Type: $TYPE"
-      
-      # 4. Déboguer le chemin des skills
-      - name: Déboguer skills
-        run: |
-          echo "=== Contenu de skills-repo/ ==="
-          ls -la skills-repo/ || echo "skills-repo/ introuvable"
-          echo "=== Sous-dossiers ==="
-          find skills-repo/ -type d | head -20 || echo "Aucun dossier trouvé"
-          echo "=== Fichiers .md ==="
-          find skills-repo/ -name "*.md" | head -20 || echo "Aucun .md trouvé"
-
-      # 5. Installer dépendances Python
+      # 3. Installer dépendances Python
       - name: Installer dépendances
         run: pip install anthropic
 
-      # 6. Générer le .grist
+      # 4. Calculer le slug et l'URL GitHub Pages du widget
+      - name: Calculer slug widget
+        id: slug
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: |
+          SLUG=$(echo "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | cut -c1-40)
+          WIDGET_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/widgets/${SLUG}/"
+          echo "slug=$SLUG" >> $GITHUB_OUTPUT
+          echo "widget_url=$WIDGET_URL" >> $GITHUB_OUTPUT
+          echo "Widget URL : $WIDGET_URL"
+
+      # 5. Générer le .grist + widget.html
       - name: Générer widget
         env:
           ISSUE_TITLE: ${{ github.event.issue.title }}
@@ -76,28 +55,47 @@ jobs:
             "/tmp/spec_body.txt" \
             "custom" \
             "Document_sans_titre.grist" \
-            "skills-repo/01-skills-universels"
-      
-      # 5. Upload en artifact
+            "skills-repo/01-skills-universels" \
+            "${{ steps.slug.outputs.widget_url }}"
+
+      # 6. Publier widget.html dans le repo (GitHub Pages)
+      - name: Publier widget HTML
+        run: |
+          SLUG="${{ steps.slug.outputs.slug }}"
+          mkdir -p "widgets/$SLUG"
+          if [ -f widget.html ]; then
+            cp widget.html "widgets/$SLUG/index.html"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "widgets/$SLUG/index.html"
+            git commit -m "widget: ${{ github.event.issue.title }}"
+            git push
+            echo "✅ Widget publié sur GitHub Pages"
+          else
+            echo "⚠️  widget.html absent (ANTHROPIC_API_KEY non configuré ?)"
+          fi
+
+      # 7. Upload artifact .grist
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: widget-grist
           path: "*.grist"
           retention-days: 7
-      
-      # 6. Commenter l'issue avec le lien
+
+      # 8. Commenter l'issue
       - name: Commenter issue
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const files = fs.readdirSync('.').filter(f => f.endsWith('.grist'));
-            const filename = files[0];
-            
+            const filename = files[0] || 'widget.grist';
+            const widgetUrl = '${{ steps.slug.outputs.widget_url }}';
+
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `Votre widget est pret !\n\nFichier: ${filename}\n\nAllez dans Actions > Summary > Artifacts pour telecharger`
+              body: `✅ Widget généré !\n\n**Fichier .grist** : téléchargeable dans [Actions > Artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions)\n\n**Widget URL** : ${widgetUrl}\n\n> Assurez-vous que GitHub Pages est activé sur ce repo (Settings → Pages → Branch: main)`
             });
