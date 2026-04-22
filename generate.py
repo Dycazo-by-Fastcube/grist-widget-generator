@@ -18,17 +18,104 @@ def sanitize_table_id(name):
     return sanitized[:50] or 'Table'
 
 
-def generer_code_widget(spec, skills):
-    """Appel Claude API pour générer le HTML/JS du widget, sauvegardé dans widget.html."""
+def sql_type_for(grist_type):
+    if grist_type in ('Int',):
+        return 'INTEGER'
+    if grist_type in ('Numeric', 'Date', 'DateTime'):
+        return 'NUMERIC'
+    if grist_type == 'Bool':
+        return 'INTEGER'
+    return 'TEXT'
+
+
+def get_anthropic_client():
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
+        return None
+    import anthropic
+    return anthropic.Anthropic(api_key=api_key)
+
+
+# ---------------------------------------------------------------------------
+# 1. Générer le schéma de colonnes pour chaque table
+# ---------------------------------------------------------------------------
+
+def generer_schema_tables(spec):
+    """Demande à Claude les colonnes adaptées à chaque table de la spec."""
+    client = get_anthropic_client()
+    if not client:
+        print("⚠️  ANTHROPIC_API_KEY absent, colonnes génériques utilisées")
+        return {}
+
+    tables = spec.get('tables', [])
+    if not tables:
+        return {}
+
+    prompt = f"""Tu es un expert Grist. Analyse cette spec et génère les colonnes pour chaque table.
+
+SPEC :
+{json.dumps(spec, indent=2, ensure_ascii=False)}
+
+Tables à définir : {tables}
+
+Types Grist disponibles : Text, Int, Numeric, Date, DateTime, Bool, Choice, Ref:NomTable
+
+Réponds UNIQUEMENT avec un JSON valide, sans markdown :
+{{
+  "NomTable": [
+    {{"colId": "snake_case", "type": "Text", "label": "Libellé", "choices": null}},
+    ...
+  ]
+}}
+
+Règles strictes :
+- colId en snake_case sans accents ni espaces
+- Toujours commencer par un champ identifiant (nom, titre, reference…) de type Text
+- Pour Choice : "choices" = ["val1","val2",...], sinon null
+- Pour Ref : type = "Ref:NomAutreTable" (nom exact de la table cible)
+- Entre 3 et 7 colonnes par table, pertinentes pour le besoin exprimé
+- Ne PAS inclure : id, manualSort, acl_viewers, acl_editors, acl_deleters"""
+
+    try:
+        message = client.messages.create(
+            model="claude-opus-4-7",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = message.content[0].text.strip()
+        start = raw.index('{')
+        end = raw.rindex('}') + 1
+        schema = json.loads(raw[start:end])
+        print(f"✅ Schéma colonnes généré : {list(schema.keys())}")
+        return schema
+    except Exception as e:
+        print(f"⚠️  Erreur schéma colonnes ({e}), colonnes génériques utilisées")
+        return {}
+
+
+def colonnes_par_defaut():
+    """Colonnes génériques si Claude ne répond pas."""
+    return [
+        {"colId": "nom",         "type": "Text",   "label": "Nom",         "choices": None},
+        {"colId": "description", "type": "Text",   "label": "Description", "choices": None},
+        {"colId": "statut",      "type": "Choice", "label": "Statut",
+         "choices": ["Actif", "Inactif", "Archivé"]},
+        {"colId": "responsable", "type": "Text",   "label": "Responsable", "choices": None},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 2. Générer le code widget HTML via Claude
+# ---------------------------------------------------------------------------
+
+def generer_code_widget(spec, skills):
+    """Appel Claude API pour générer le HTML/JS du widget, sauvegardé dans widget.html."""
+    client = get_anthropic_client()
+    if not client:
         print("⚠️  ANTHROPIC_API_KEY absent, widget HTML non généré")
         return None
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-
         skill_widget = skills.get('skill-grist-widget.md', '')
         skill_rls    = skills.get('skill-grist-rls.md', '')
 
@@ -52,7 +139,7 @@ Génère un fichier HTML complet et autonome qui :
 6. A un design propre avec CSS intégré
 
 CONTRAINTE CRITIQUE : ta réponse ne doit pas dépasser 3800 tokens.
-Pour rester dans cette limite : CSS minimal (pas de règles redondantes), JS sans commentaires,
+CSS minimal (pas de règles redondantes), JS sans commentaires,
 pas de bibliothèques externes inutiles, fonctionnalités essentielles seulement.
 Le fichier DOIT être syntaxiquement complet — ne jamais laisser une fonction ou balise ouverte.
 
@@ -74,7 +161,6 @@ Réponds UNIQUEMENT avec le code HTML complet, sans bloc markdown ni explication
             if message.stop_reason != 'max_tokens':
                 break
 
-            # Tronqué : demander la suite
             messages.append({"role": "assistant", "content": chunk})
             messages.append({"role": "user", "content": "Continue exactement où tu t'es arrêté. Ne répète aucune ligne déjà écrite. Termine jusqu'à </html>."})
 
@@ -85,7 +171,7 @@ Réponds UNIQUEMENT avec le code HTML complet, sans bloc markdown ni explication
 
         with open('widget.html', 'w', encoding='utf-8') as f:
             f.write(html)
-        print(f"✅ Code widget généré et sauvegardé dans widget.html ({len(html)} caractères)")
+        print(f"✅ widget.html sauvegardé ({len(html)} chars)")
         return html
 
     except Exception as e:
@@ -93,35 +179,32 @@ Réponds UNIQUEMENT avec le code HTML complet, sans bloc markdown ni explication
         return None
 
 
+# ---------------------------------------------------------------------------
+# 3. Ajouter la page widget custom dans le .grist
+# ---------------------------------------------------------------------------
+
 def ajouter_section_custom_widget(cur, widget_url, n_tables):
     """Ajoute une page 'Widget' avec une section custom dans le .grist."""
-    # Grist accepte l'URL en clair ou en JSON — on tente les deux formats
-    custom_def = widget_url  # format plain string (plus compatible)
-
-    # IDs qui suivent les tables de données
     SECTIONS_PER_TABLE = 3
     view_id    = n_tables * SECTIONS_PER_TABLE + 1
     section_id = view_id
     page_id    = n_tables + 1
 
-    # Vérifier si la colonne customDef existe dans le schéma
     cur.execute("PRAGMA table_info(_grist_Views_section)")
     col_names = {row[1] for row in cur.fetchall()}
-
-    cur.execute("INSERT INTO _grist_Views VALUES (?, 'Widget', 'custom', '')", (view_id,))
 
     if 'customDef' not in col_names:
         cur.execute("ALTER TABLE _grist_Views_section ADD COLUMN customDef TEXT DEFAULT ''")
         print("✅ Colonne customDef ajoutée au schéma")
 
+    cur.execute("INSERT INTO _grist_Views VALUES (?, 'Widget', 'custom', '')", (view_id,))
     cur.execute(
         "INSERT INTO _grist_Views_section "
         "(id, tableRef, parentId, parentKey, title, defaultWidth, borderWidth, customDef) "
         "VALUES (?,0,?,'custom','Widget',100,1,?)",
-        (section_id, view_id, custom_def)
+        (section_id, view_id, widget_url)
     )
 
-    # Vérification — on relit ce qui a été stocké
     cur.execute("SELECT customDef FROM _grist_Views_section WHERE id = ?", (section_id,))
     row = cur.fetchone()
     stored = row[0] if row else None
@@ -132,6 +215,10 @@ def ajouter_section_custom_widget(cur, widget_url, n_tables):
     print(f"✅ Page widget custom ajoutée (view_id={view_id})")
 
 
+# ---------------------------------------------------------------------------
+# 4. Générer le .grist complet
+# ---------------------------------------------------------------------------
+
 def generer_widget(nom_module, description, type_app, template_path, skills_path, widget_url=None):
     # Lire depuis un fichier si description est un chemin
     if os.path.isfile(description):
@@ -140,7 +227,6 @@ def generer_widget(nom_module, description, type_app, template_path, skills_path
     else:
         raw = description
 
-    # Extraire le JSON depuis le body (qui peut contenir "**Description :** {...}")
     spec = {}
     try:
         start = raw.index('{')
@@ -163,10 +249,9 @@ def generer_widget(nom_module, description, type_app, template_path, skills_path
     shutil.copy(template_path, output_path)
     conn = sqlite3.connect(output_path)
     cur = conn.cursor()
-
     print("✅ Template chargé")
 
-    # Charger les skills (noms corrects dans le repo privé)
+    # Charger les skills
     skills = {}
     print(f"📁 Chemin skills : {skills_path} (existe: {os.path.exists(skills_path)})")
     if os.path.exists(skills_path):
@@ -179,6 +264,9 @@ def generer_widget(nom_module, description, type_app, template_path, skills_path
             else:
                 print(f"⚠️  Skill introuvable : {skill_path}")
 
+    # Générer le schéma de colonnes adapté à la spec
+    schema = generer_schema_tables(spec)
+
     # Nettoyer Table1 du template
     cur.execute("DROP TABLE IF EXISTS Table1")
     cur.execute("DELETE FROM _grist_Tables WHERE tableId='Table1'")
@@ -188,32 +276,32 @@ def generer_widget(nom_module, description, type_app, template_path, skills_path
     cur.execute("DELETE FROM _grist_Views_section_field WHERE parentId IN (1,2,3)")
     cur.execute("DELETE FROM _grist_Pages WHERE viewRef=1")
     cur.execute("DELETE FROM _grist_TabBar WHERE viewRef=1")
-
     print("✅ Template nettoyé")
 
     SECTIONS_PER_TABLE = 3
-    COLS_PER_TABLE     = 8
-    VISIBLE_COLS       = 4
-    FIELDS_PER_TABLE   = VISIBLE_COLS * 2  # main + raw sections
+    col_id   = 1  # compteur global croissant
+    field_id = 1  # compteur global croissant
+    acl_formula = '$responsable_email'
 
     for i, table_name in enumerate(tables_list):
-        table_ref  = i + 1
-        view_id    = i * SECTIONS_PER_TABLE + 1
-        main_sec   = view_id
-        raw_sec    = view_id + 1
-        card_sec   = view_id + 2
-        col_base   = i * COLS_PER_TABLE + 1
-        field_base = i * FIELDS_PER_TABLE + 1
+        table_ref = i + 1
+        view_id   = i * SECTIONS_PER_TABLE + 1
+        main_sec  = view_id
+        raw_sec   = view_id + 1
+        card_sec  = view_id + 2
 
         table_id = sanitize_table_id(table_name)
+        data_cols = schema.get(table_name) or colonnes_par_defaut()
 
+        # --- Créer la table SQL ---
+        sql_cols = ", ".join(
+            f'"{c["colId"]}" {sql_type_for(c["type"])}'
+            for c in data_cols
+        )
         cur.execute(f'''
             CREATE TABLE IF NOT EXISTS "{table_id}" (
                 id INTEGER PRIMARY KEY,
-                nom TEXT,
-                description TEXT,
-                statut TEXT DEFAULT 'Actif',
-                responsable_email TEXT,
+                {sql_cols},
                 acl_viewers TEXT,
                 acl_editors TEXT,
                 acl_deleters TEXT,
@@ -226,23 +314,36 @@ def generer_widget(nom_module, description, type_app, template_path, skills_path
             (table_ref, table_id, view_id, raw_sec, card_sec)
         )
 
-        acl_formula = '$responsable_email'
-        cols = [
-            (col_base,   table_ref, 1.0, 'manualSort',        'ManualSortPos', '',                                          0, '',          ''),
-            (col_base+1, table_ref, 2.0, 'nom',               'Text',          '',                                          0, '',          'Nom'),
-            (col_base+2, table_ref, 3.0, 'description',       'Text',          '',                                          0, '',          'Description'),
-            (col_base+3, table_ref, 4.0, 'statut',            'Choice',        '{"choices":["Actif","Inactif","Archivé"]}', 0, '',          'Statut'),
-            (col_base+4, table_ref, 5.0, 'responsable_email', 'Text',          '',                                          0, '',          'Responsable'),
-            (col_base+5, table_ref, 6.0, 'acl_viewers',       'Text',          '',                                          1, acl_formula, 'ACL Viewers'),
-            (col_base+6, table_ref, 7.0, 'acl_editors',       'Text',          '',                                          1, acl_formula, 'ACL Editors'),
-            (col_base+7, table_ref, 8.0, 'acl_deleters',      'Text',          '',                                          1, acl_formula, 'ACL Deleters'),
-        ]
-        for col in cols:
+        # --- Colonnes Grist ---
+        # manualSort (système, non visible)
+        cur.execute(
+            'INSERT INTO _grist_Tables_column (id, parentId, parentPos, colId, type, widgetOptions, isFormula, formula, label) VALUES (?,?,?,?,?,?,?,?,?)',
+            (col_id, table_ref, 0.0, 'manualSort', 'ManualSortPos', '', 0, '', '')
+        )
+        col_id += 1
+
+        # colonnes de données (visibles)
+        visible_col_ids = []
+        for pos, c in enumerate(data_cols, start=1):
+            widget_opts = ''
+            if c['type'] == 'Choice' and c.get('choices'):
+                widget_opts = json.dumps({"choices": c['choices']})
             cur.execute(
                 'INSERT INTO _grist_Tables_column (id, parentId, parentPos, colId, type, widgetOptions, isFormula, formula, label) VALUES (?,?,?,?,?,?,?,?,?)',
-                col
+                (col_id, table_ref, float(pos), c['colId'], c['type'], widget_opts, 0, '', c['label'])
             )
+            visible_col_ids.append(col_id)
+            col_id += 1
 
+        # ACL (système, non visibles)
+        for acl_col in ['acl_viewers', 'acl_editors', 'acl_deleters']:
+            cur.execute(
+                'INSERT INTO _grist_Tables_column (id, parentId, parentPos, colId, type, widgetOptions, isFormula, formula, label) VALUES (?,?,?,?,?,?,?,?,?)',
+                (col_id, table_ref, float(len(data_cols) + 1), acl_col, 'Text', '', 1, acl_formula, acl_col)
+            )
+            col_id += 1
+
+        # --- Vue et sections ---
         cur.execute("INSERT INTO _grist_Views VALUES (?, ?, 'raw_data', '')", (view_id, table_name))
 
         for sid, pid, pkey in [
@@ -255,27 +356,29 @@ def generer_widget(nom_module, description, type_app, template_path, skills_path
                 (sid, table_ref, pid, pkey, '', 100, 1)
             )
 
-        visible_col_refs = [col_base+1, col_base+2, col_base+3, col_base+4]
-        fid = field_base
+        # Fields visibles dans main_sec et raw_sec
         for section_id in [main_sec, raw_sec]:
-            for col_ref in visible_col_refs:
+            for cref in visible_col_ids:
                 cur.execute(
                     "INSERT INTO _grist_Views_section_field (id, parentId, colRef, width) VALUES (?,?,?,?)",
-                    (fid, section_id, col_ref, 0)
+                    (field_id, section_id, cref, 0)
                 )
-                fid += 1
+                field_id += 1
 
         cur.execute("INSERT INTO _grist_Pages VALUES (?,?,0,?,0,'')", (table_ref, view_id, i + 1))
         cur.execute("INSERT INTO _grist_TabBar VALUES (?,?,?)", (table_ref, view_id, i + 1))
 
+        # Donnée de démo : insérer une ligne avec la première colonne de données
+        first_col = data_cols[0]['colId'] if data_cols else 'nom'
         cur.execute(
-            f'INSERT INTO "{table_id}" (id, nom, description, statut, responsable_email, manualSort) VALUES (1, ?, ?, ?, ?, 1)',
-            (f'Exemple {table_name}', 'Description exemple', 'Actif', 'demo@example.com')
+            f'INSERT INTO "{table_id}" ("{first_col}", manualSort) VALUES (?, 1)',
+            (f'Exemple {table_name}',)
         )
 
-        print(f"✅ Table créée : {table_name} → {table_id}")
+        col_labels = ', '.join(c['label'] for c in data_cols)
+        print(f"✅ Table créée : {table_name} → {table_id} [{col_labels}]")
 
-    # Générer le code widget via Claude et l'intégrer
+    # Générer le code widget HTML et l'intégrer
     widget_html = generer_code_widget(spec, skills)
     if widget_html and widget_url:
         ajouter_section_custom_widget(cur, widget_url, len(tables_list))
@@ -288,13 +391,12 @@ def generer_widget(nom_module, description, type_app, template_path, skills_path
     print(f"📋 Tables : {', '.join(tables_list)}")
     print(f"👥 Rôles : {', '.join(roles)}")
     print(f"📚 Skills chargés : {len(skills)}")
-
     return output_path
 
 
 if __name__ == '__main__':
     if len(sys.argv) < 4:
-        print("Usage: python generate.py <nom_module> <description_json> <type_app> [template_path] [skills_path]")
+        print("Usage: python generate.py <nom_module> <description_json> <type_app> [template_path] [skills_path] [widget_url]")
         sys.exit(1)
 
     nom_module    = sys.argv[1]
