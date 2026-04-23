@@ -468,7 +468,7 @@
         function saveCurrentStepData() {
             if (currentStep === 1) formData.description = document.getElementById('description').value.trim();
             if (currentStep === 2) formData.roles = Array.from(document.querySelectorAll('#rolesList input')).map(i => i.value.trim()).filter(r => r);
-            if (currentStep === 3) roles.forEach(role => { const t = document.querySelector(`textarea[name="us_${role}"]`); if(t) formData.userStories[role] = t.value.trim(); });
+            if (currentStep === 3) collectUserStories();
             if (currentStep === 5) formData.screens = document.getElementById('screens').value.trim();
         }
         
@@ -549,11 +549,7 @@
             
             try {
                 // Collect user stories
-                const userStories = {};
-                roles.forEach(role => {
-                    const textarea = document.querySelector(`textarea[name="us_${role}"]`);
-                    userStories[role] = textarea ? textarea.value.trim() : '';
-                });
+                const userStories = collectUserStories();
                 
                 const spec = {
                     description: document.getElementById('description').value.trim(),
@@ -643,22 +639,74 @@
             btn.parentElement.remove();
         }
         
+        function sanitizeId(str) {
+            return str.replace(/[^a-zA-Z0-9_-]/g, '_');
+        }
+
+        function escapeAttr(str) {
+            return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function addUSBlock(role, jePeux = '', afinDe = '') {
+            const roleId = sanitizeId(role);
+            const container = document.getElementById(`us_blocks_${roleId}`);
+            if (!container) return;
+            const block = document.createElement('div');
+            block.className = 'us-block';
+            block.dataset.role = role;
+            block.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:10px 12px;background:white;border:1px solid #e0e0e0;border-radius:8px;flex-wrap:wrap;';
+            block.innerHTML = `
+                <span style="color:#555;font-size:13px;white-space:nowrap;">En tant que <strong>${escapeAttr(role)}</strong>, je peux</span>
+                <input type="text" class="us-jepeux" placeholder="créer un entretien" value="${escapeAttr(jePeux)}" style="flex:1;min-width:140px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;">
+                <span style="color:#555;font-size:13px;white-space:nowrap;">afin de</span>
+                <input type="text" class="us-afinde" placeholder="documenter les échanges" value="${escapeAttr(afinDe)}" style="flex:1;min-width:140px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;">
+                <button type="button" onclick="this.closest('.us-block').remove()" style="padding:4px 10px;background:#fee2e2;border:none;border-radius:4px;color:#dc2626;cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;">×</button>
+            `;
+            container.appendChild(block);
+        }
+
+        function collectUserStories() {
+            const result = {};
+            roles.forEach(role => {
+                const blocks = document.querySelectorAll(`.us-block[data-role="${CSS.escape(role)}"]`);
+                const items = [];
+                const lines = [];
+                blocks.forEach(block => {
+                    const jePeux = block.querySelector('.us-jepeux').value.trim();
+                    const afinDe = block.querySelector('.us-afinde').value.trim();
+                    items.push({ jePeux, afinDe });
+                    if (jePeux) {
+                        lines.push(`En tant que ${role}, je peux ${jePeux}${afinDe ? ', afin de ' + afinDe : ''}.`);
+                    }
+                });
+                formData.userStories[role] = items;
+                result[role] = lines.join('\n');
+            });
+            return result;
+        }
+
         function generateUserStoriesFields() {
             const container = document.getElementById('userStoriesContainer');
             container.innerHTML = '';
-            
+
             roles.forEach(role => {
+                const roleId = sanitizeId(role);
                 const section = document.createElement('div');
                 section.className = 'role-section';
+                section.style.marginBottom = '20px';
                 section.innerHTML = `
-                    <h4>${role}</h4>
-                    <textarea 
-                        name="us_${role}" 
-                        placeholder="Ex: En tant que ${role}, je peux créer un entretien, consulter l'historique, éditer les objectifs..."
-                        style="width: 100%; min-height: 100px; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px;"
-                    ></textarea>
+                    <h4 style="margin-bottom:10px;">👤 ${escapeAttr(role)}</h4>
+                    <div id="us_blocks_${roleId}"></div>
+                    <button type="button" onclick="addUSBlock('${escapeAttr(role)}')" style="margin-top:6px;padding:8px 16px;background:#f0fdf4;border:1px dashed rgb(23,207,136);border-radius:6px;color:rgb(23,207,136);cursor:pointer;font-size:13px;">+ Ajouter une User Story</button>
                 `;
                 container.appendChild(section);
+
+                const saved = formData.userStories[role];
+                if (Array.isArray(saved) && saved.length > 0) {
+                    saved.forEach(item => addUSBlock(role, item.jePeux || '', item.afinDe || ''));
+                } else {
+                    addUSBlock(role);
+                }
             });
         }
         
@@ -735,10 +783,8 @@
             };
             
             // User stories
-            roles.forEach(role => {
-                const textarea = document.querySelector(`textarea[name="us_${role}"]`);
-                spec.userStories[role] = textarea ? textarea.value.trim() : '';
-            });
+            const userStoriesStrings = collectUserStories();
+            roles.forEach(role => { spec.userStories[role] = userStoriesStrings[role] || ''; });
             
             // Permissions (nouvelle structure : par table et par rôle)
             tables.forEach(table => {
