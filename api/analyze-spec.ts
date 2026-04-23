@@ -9,6 +9,9 @@ interface RequestBody {
   userStories: { [role: string]: string };
 }
 
+type Permission = 'create' | 'read' | 'update' | 'delete';
+type SuggestedPermissions = { [table: string]: { [role: string]: Permission[] } };
+
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
@@ -48,7 +51,7 @@ export default async function handler(
 
     const prompt = `Tu es un expert en conception d'applications métier et bases de données.
 
-Analyse ce besoin et identifie les tables principales nécessaires :
+Analyse ce besoin, identifie les tables nécessaires et suggère des droits d'accès par rôle.
 
 **Description globale :**
 ${description}
@@ -59,13 +62,23 @@ ${roles.join(', ')}
 **User Stories par rôle :**
 ${userStoriesText}
 
-**Tâche :**
-Identifie les 3 à 6 tables principales nécessaires pour cette application.
-Nomme-les au singulier, en français, de manière claire (ex: "Collaborateur", "Entretien", "Objectif").
+**Tâches :**
+1. Identifie les 3 à 6 tables principales nécessaires. Nomme-les au singulier, en français (ex: "Collaborateur", "Entretien", "Objectif").
+2. Pour chaque table et chaque rôle, suggère les permissions appropriées parmi : "create", "read", "update", "delete". Base-toi sur les user stories et le bon sens métier.
 
 **Réponds UNIQUEMENT avec un JSON valide dans ce format exact :**
 {
-  "tables": ["Nom1", "Nom2", "Nom3"]
+  "tables": ["Nom1", "Nom2", "Nom3"],
+  "suggestedPermissions": {
+    "Nom1": {
+      "RoleA": ["create", "read", "update", "delete"],
+      "RoleB": ["read"]
+    },
+    "Nom2": {
+      "RoleA": ["create", "read", "update", "delete"],
+      "RoleB": ["read", "update"]
+    }
+  }
 }
 
 Pas de texte avant ou après, juste le JSON.`;
@@ -106,25 +119,25 @@ Pas de texte avant ou après, juste le JSON.`;
     
     // Parse JSON from response
     let tables: string[];
+    let suggestedPermissions: SuggestedPermissions = {};
     try {
-      // Remove any markdown code blocks if present
       const cleanJson = responseText.replace(/```json\n?|\n?```/g, '').trim();
       const parsed = JSON.parse(cleanJson);
       tables = parsed.tables || [];
+      suggestedPermissions = parsed.suggestedPermissions || {};
     } catch (parseError) {
       console.error('Failed to parse Claude response:', responseText);
-      // Fallback: extract table names manually
       tables = ['Entité principale', 'Relation', 'Paramètre'];
     }
 
-    // Validate tables
     if (!Array.isArray(tables) || tables.length === 0) {
       tables = ['Entité principale', 'Relation', 'Paramètre'];
     }
 
     return res.status(200).json({
       success: true,
-      tables: tables,
+      tables,
+      suggestedPermissions,
     });
 
   } catch (error) {

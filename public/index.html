@@ -450,6 +450,7 @@
         const totalSteps = 5;
         let roles = [];
         let tables = [];
+        let suggestedPermissions = {};
 
         let formData = {
             description: '',
@@ -568,7 +569,8 @@
                 
                 const result = await response.json();
                 tables = result.tables || [];
-                
+                suggestedPermissions = result.suggestedPermissions || {};
+
                 if (tables.length === 0) {
                     throw new Error('Aucune table identifiée');
                 }
@@ -792,54 +794,64 @@
         function generatePermissionsFields() {
             const container = document.getElementById('permissionsContainer');
             container.innerHTML = '';
-            
+
             if (tables.length === 0 || roles.length === 0) {
                 container.innerHTML = '<p style="color: #999;">Aucune table ou rôle défini.</p>';
                 return;
             }
-            
-            const intro = document.createElement('p');
-            intro.style.cssText = 'margin-bottom: 20px; color: #666; font-size: 14px;';
-            intro.textContent = `Tables identifiées basées sur votre description : ${tables.join(', ')}. Définissez les permissions pour chaque rôle.`;
-            container.appendChild(intro);
-            
-            // Create matrix: one section per table
+
+            const hasSuggestions = Object.keys(suggestedPermissions).length > 0;
+
+            const banner = document.createElement('div');
+            banner.style.cssText = 'margin-bottom:16px;padding:10px 14px;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:8px;';
+            if (hasSuggestions) {
+                banner.style.background = '#f0fdf4';
+                banner.style.border = '1px solid #bbf7d0';
+                banner.style.color = '#166534';
+                banner.innerHTML = '✨ <span>Droits pré-remplis par l\'IA d\'après vos user stories — vérifiez et ajustez si nécessaire.</span>';
+            } else {
+                banner.style.background = '#f8fafc';
+                banner.style.border = '1px solid #e2e8f0';
+                banner.style.color = '#64748b';
+                banner.innerHTML = `<span>Tables identifiées : <strong>${tables.join(', ')}</strong>. Définissez les permissions pour chaque rôle.</span>`;
+            }
+            container.appendChild(banner);
+
             tables.forEach(table => {
                 const section = document.createElement('div');
                 section.className = 'role-section';
                 section.style.marginBottom = '24px';
-                
-                let html = `<h4>📊 ${table}</h4>`;
-                
-                // Create grid of roles x permissions
-                html += '<div style="display: grid; gap: 16px;">';
-                
+
+                let html = `<h4>📊 ${table}</h4><div style="display:grid;gap:16px;">`;
+
                 roles.forEach(role => {
+                    const perms = (suggestedPermissions[table] && suggestedPermissions[table][role]) || (hasSuggestions ? [] : ['read']);
+                    const c = (v) => perms.includes(v) ? ' checked' : '';
                     html += `
-                        <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #e0e0e0;">
-                            <div style="font-weight: 600; color: rgb(23, 207, 136); margin-bottom: 8px;">${role}</div>
-                            <div class="permissions-grid" style="grid-template-columns: repeat(4, 1fr);">
+                        <div style="background:white;padding:12px;border-radius:6px;border:1px solid #e0e0e0;">
+                            <div style="font-weight:600;color:rgb(23,207,136);margin-bottom:8px;">${role}</div>
+                            <div class="permissions-grid" style="grid-template-columns:repeat(4,1fr);">
                                 <div class="permission-checkbox">
-                                    <input type="checkbox" id="${table}_${role}_create" name="perm_${table}_${role}" value="create">
+                                    <input type="checkbox" id="${table}_${role}_create" name="perm_${table}_${role}" value="create"${c('create')}>
                                     <label for="${table}_${role}_create">Créer</label>
                                 </div>
                                 <div class="permission-checkbox">
-                                    <input type="checkbox" id="${table}_${role}_read" name="perm_${table}_${role}" value="read" checked>
+                                    <input type="checkbox" id="${table}_${role}_read" name="perm_${table}_${role}" value="read"${c('read')}>
                                     <label for="${table}_${role}_read">Lire</label>
                                 </div>
                                 <div class="permission-checkbox">
-                                    <input type="checkbox" id="${table}_${role}_update" name="perm_${table}_${role}" value="update">
+                                    <input type="checkbox" id="${table}_${role}_update" name="perm_${table}_${role}" value="update"${c('update')}>
                                     <label for="${table}_${role}_update">Modifier</label>
                                 </div>
                                 <div class="permission-checkbox">
-                                    <input type="checkbox" id="${table}_${role}_delete" name="perm_${table}_${role}" value="delete">
+                                    <input type="checkbox" id="${table}_${role}_delete" name="perm_${table}_${role}" value="delete"${c('delete')}>
                                     <label for="${table}_${role}_delete">Supprimer</label>
                                 </div>
                             </div>
                         </div>
                     `;
                 });
-                
+
                 html += '</div>';
                 section.innerHTML = html;
                 container.appendChild(section);
