@@ -79,11 +79,17 @@ export default async function handler(
 
     const issue = await githubResponse.json();
 
-    // Success response
+    // Compute widget URLs (mirrors workflow slug logic)
+    const slug = nom_module.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 40);
+    const widget_url = `https://${GITHUB_OWNER}.github.io/${GITHUB_REPO}/widgets/${slug}/`;
+    const grist_url = `${widget_url}widget.grist`;
+
     return res.status(200).json({
       success: true,
       issue_number: issue.number,
       issue_url: issue.html_url,
+      widget_url,
+      grist_url,
       message: 'Widget generation started! Check the issue for progress.',
     });
 
