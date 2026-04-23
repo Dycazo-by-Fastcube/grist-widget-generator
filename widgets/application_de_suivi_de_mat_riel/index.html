@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Suivi Matériel</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#f5f7fa;color:#222;font-size:14px}
+.app{max-width:1200px;margin:0 auto;padding:16px}
+.tabs{display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid #e0e4e8}
+.tab{padding:10px 18px;cursor:pointer;border:none;background:none;font-size:14px;color:#555;border-bottom:2px solid transparent;margin-bottom:-2px}
+.tab.active{color:#2563eb;border-bottom-color:#2563eb;font-weight:600}
+.card{background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:16px}
+h2{margin:0 0 12px;font-size:18px}
+h3{margin:16px 0 8px;font-size:15px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #eef1f4}
+th{background:#f8fafc;font-weight:600;color:#475569}
+tr:hover td{background:#fafbfc}
+button{cursor:pointer;border:none;border-radius:6px;padding:7px 12px;font-size:13px;background:#2563eb;color:#fff}
+button:hover{background:#1d4ed8}
+button.sec{background:#e5e7eb;color:#222}
+button.sec:hover{background:#d1d5db}
+button.danger{background:#dc2626}
+button.danger:hover{background:#b91c1c}
+button.sm{padding:4px 8px;font-size:12px}
+input,select,textarea{width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-family:inherit}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#2563eb}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:10px}
+.form-actions{display:flex;gap:8px;margin-top:10px}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;background:#dbeafe;color:#1e40af}
+.badge.ok{background:#dcfce7;color:#166534}
+.badge.warn{background:#fef3c7;color:#92400e}
+.toast{position:fixed;top:16px;right:16px;padding:10px 16px;border-radius:6px;color:#fff;z-index:1000;animation:slide .3s}
+.toast.ok{background:#16a34a}.toast.err{background:#dc2626}
+@keyframes slide{from{transform:translateX(100%)}}
+.empty{text-align:center;padding:30px;color:#94a3b8}
+.hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+label{font-size:12px;color:#475569;font-weight:500;display:block;margin-bottom:3px}
+.muted{color:#64748b;font-size:12px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef} = React;
+
+const toRows = (t) => {
+  const ids = t.id || [];
+  return ids.map((id,i) => {
+    const r = {id};
+    Object.keys(t).forEach(k => { if(k!=='id') r[k]=t[k][i]; });
+    return r;
+  });
+};
+
+const TABLES = {col:'Collaborateur',mat:'Materiel',aff:'Affectation',cat:'Categorie'};
+
+function App(){
+  const [tab,setTab] = useState('materiel');
+  const [profil,setProfil] = useState(null);
+  const [collaborateurs,setColl] = useState([]);
+  const [materiels,setMat] = useState([]);
+  const [affectations,setAff] = useState([]);
+  const [categories,setCat] = useState([]);
+  const [toast,setToast] = useState(null);
+  const toastT = useRef(null);
+
+  const notify = (type,msg) => {
+    setToast({type,msg});
+    if(toastT.current) clearTimeout(toastT.current);
+    toastT.current = setTimeout(()=>setToast(null),2800);
+  };
+
+  const load = async () => {
+    try{
+      const [c,m,a,cat] = await Promise.all([
+        grist.docApi.fetchTable(TABLES.col).catch(()=>({id:[]})),
+        grist.docApi.fetchTable(TABLES.mat).catch(()=>({id:[]})),
+        grist.docApi.fetchTable(TABLES.aff).catch(()=>({id:[]})),
+        grist.docApi.fetchTable(TABLES.cat).catch(()=>({id:[]})),
+      ]);
+      setColl(toRows(c));setMat(toRows(m));setAff(toRows(a));setCat(toRows(cat));
+    }catch(e){notify('err','Erreur chargement: '+e.message);}
+  };
+
+  useEffect(()=>{
+    grist.ready({requiredAccess:'full'});
+    grist.onRecords(async (records)=>{
+      if(records && records[0]) setProfil(records[0]);
+      await load();
+    });
+    load();
+  },[]);
+
+  const moi = profil ? collaborateurs.find(c => c.email === profil.email || c.Email === profil.Email) : null;
+  const isAdmin = moi && (moi.role === 'Admin' || moi.Role === 'Admin' || moi.admin === true);
+
+  const getCollabNom = (id) => {
+    const c = collaborateurs.find(x=>x.id===id);
+    return c ? (c.nom||c.Nom||c.name||`#${id}`) : `#${id}`;
+  };
+  const getMatNom = (id) => {
+    const m = materiels.find(x=>x.id===id);
+    return m ? (m.nom||m.Nom||m.name||`#${id}`) : `#${id}`;
+  };
+  const getCatNom = (id) => {
+    const c = categories.find(x=>x.id===id);
+    return c ? (c.nom||c.Nom||c.name||`#${id}`) : '';
+  };
+
+  return (
+    <div className="app">
+      {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
+      <div className="tabs">
+        <button className={`tab ${tab==='materiel'?'active':''}`} onClick={()=>setTab('materiel')}>📦 Matériel</button>
+        <button className={`tab ${tab==='mes'?'active':''}`} onClick={()=>setTab('mes')}>👤 Mes Affectations</button>
+        {isAdmin && <button className={`tab ${tab==='admin'?'active':''}`} onClick={()=>setTab('admin')}>⚙️ Admin</button>}
+      </div>
+
+      {tab==='materiel' && <VueMateriel materiels={materiels} affectations={affectations} getCollabNom={getCollabNom} getCatNom={getCatNom}/>}
+      {tab==='mes' && <VueMes moi={moi} affectations={affectations} getMatNom={getMatNom} materiels={materiels}/>}
+      {tab==='admin' && isAdmin && <VueAdmin collaborateurs={collaborateurs} materiels={materiels} affectations={affectations} categories={categories} getCollabNom={getCollabNom} getMatNom={getMatNom} getCatNom={getCatNom} reload={load} notify={notify}/>}
+    </div>
+  );
+}
+
+function VueMateriel({materiels,affectations,getCollabNom,getCatNom}){
+  const [q,setQ] = useState('');
+  const estAffecte = (mid) => affectations.find(a => (a.materiel||a.materiel_id) === mid && !a.date_retour);
+  const filtered = materiels.filter(m => {
+    const s = (m.nom||m.Nom||'').toLowerCase();
+    return s.includes(q.toLowerCase());
+  });
+  return (
+    <div className="card">
+      <div className="hdr">
+        <h2>Liste du matériel ({filtered.length})</h2>
+        <input style={{maxWidth:240}} placeholder="🔍 Rechercher..." value={q} onChange={e=>setQ(e.target.value)}/>
+      </div>
+      {filtered.length===0 ? <div className="empty">Aucun matériel</div> :
+      <table><thead><tr>
+        <th>Nom</th><th>Catégorie</th><th>N° série</th><th>Statut</th><th>Affecté à</th>
+      </tr></thead><tbody>
+      {filtered.map(m=>{
+        const aff = estAffecte(m.id);
+        return <tr key={m.id}>
+          <td><b>{m.nom||m.Nom||'-'}</b></td>
+          <td>{getCatNom(m.categorie||m.categorie_id)||'-'}</td>
+          <td className="muted">{m.numero_serie||m.serie||'-'}</td>
+          <td>{aff ? <span className="badge warn">Affecté</span> : <span className="badge ok">Disponible</span>}</td>
+          <td>{aff ? getCollabNom(aff.collaborateur||aff.collaborateur_id) : '-'}</td>
+        </tr>;
+      })}
+      </tbody></table>}
+    </div>
+  );
+}
+
+function VueMes({moi,affectations,getMatNom,materiels}){
+  if(!moi) return <div className="card"><div className="empty">Profil utilisateur non identifié.<br/><span className="muted">Assurez-vous qu'une ligne Collaborateur correspond à votre email.</span></div></div>;
+  const mes = affectations.filter(a => (a.collaborateur||a.collaborateur_id) === moi.id);
+  return (
+    <div className="card">
+      <h2>Mes affectations ({mes.length})</h2>
+      <p className="muted">Bonjour {moi.nom||moi.Nom||moi.email}</p>
+      {mes.length===0 ? <div className="empty">Aucune affectation</div> :
+      <table><thead><tr>
+        <th>Matériel</th><th>Date affectation</th><th>Date retour</th><th>Statut</th>
+      </tr></thead><tbody>
+      {mes.map(a=>{
+        const m = materiels.find(x=>x.id===(a.materiel||a.materiel_id));
+        return <tr key={a.id}>
+          <td><b>{getMatNom(a.materiel||a.materiel_id)}</b>{m && <div className="muted">{m.numero_serie||m.serie||''}</div>}</td>
+          <td>{a.date_affectation ? new Date(a.date_affectation*1000).toLocaleDateString() : '-'}</td>
+          <td>{a.date_retour ? new Date(a.date_retour*1000).toLocaleDateString() : '-'}</td>
+          <td>{a.date_retour ? <span className="badge">Restitué</span> : <span className="badge ok">En cours</span>}</td>
+        </tr>;
+      })}
+      </tbody></table>}
+    </div>
+  );
+}
+
+function VueAdmin({collaborateurs,materiels,affectations,categories,getCollabNom,getMatNom,getCatNom,reload,notify}){
+  const [sect,setSect] = useState('mat');
+  return (
+    <div>
+      <div className="card">
+        <div className="tabs" style={{marginBottom:0,borderBottom:'none'}}>
+          <button className={`tab ${sect==='mat'?'active':''}`} onClick={()=>setSect('mat')}>Matériel</button>
+          <button className={`tab ${sect==='cat'?'active':''}`} onClick={()=>setSect('cat')}>Catégories</button>
+          <button className={`tab ${sect==='col'?'active':''}`} onClick={()=>setSect('col')}>Collaborateurs</button>
+          <button className={`tab ${sect==='aff'?'active':''}`} onClick={()=>setSect('aff')}>Affectations</button>
+        </div>
+      </div>
+      {sect==='mat' && <AdminMat materiels={materiels} categories={categories} getCatNom={getCatNom} reload={reload} notify={notify}/>}
+      {sect==='cat' && <AdminCat categories={categories} reload={reload} notify={notify}/>}
+      {sect==='col' && <AdminCol collaborateurs={collaborateurs} reload={reload} notify={notify}/>}
+      {sect==='aff' && <AdminAff affectations={affectations} collaborateurs={collaborateurs} materiels={materiels} getCollabNom={getCollabNom} getMatNom={getMatNom} reload={reload} notify={notify}/>}
+    </div>
+  );
+}
+
+function AdminMat({materiels,categories,getCatNom,reload,notify}){
+  const [f,setF] = useState({nom:'',numero_serie:'',categorie:''});
+  const [edit,setEdit] = useState(null);
+  const save = async () => {
+    if(!f.nom){notify('err','Nom requis');return;}
+    const data = {nom:f.nom,numero_serie:f.numero_serie};
+    if(f.categorie) data.categorie = parseInt(f.categorie);
+    try{
+      if(edit) await grist.docApi.applyUserActions([['UpdateRecord',TABLES.mat,edit,data]]);
+      else await grist.docApi.applyUserActions([['AddRecord',TABLES.mat,null,data]]);
+      setF({nom:'',numero_serie:'',categorie:''});setEdit(null);
+      await reload();notify('ok',edit?'Modifié':'Ajouté');
+    }catch(e){notify('err',e.message);}
+  };
+  const del = async (id) => {
+    if(!confirm('Supprimer ?')) return;
+    try{await grist.docApi.applyUserActions([['RemoveRecord',TABLES.mat,id]]);await reload();notify('ok','Supprimé');}
+    catch(e){notify('err',e.message);}
+  };
+  const editRow = (m) => {
+    setEdit(m.id);
+    setF({nom:m.nom||m.Nom||'',numero_serie:m.numero_serie||m.serie||'',categorie:m.categorie||m.categorie_id||''});
+  };
+  return (
+    <div className="card">
+      <h3>{edit?'Modifier':'Ajouter'} un matériel</h3>
+      <div className="row">
+        <div><label>Nom *</label><input value={f.nom} onChange={e=>setF({...f,nom:e.target.value})}/></div>
+        <div><label>N° série</label><input value={f.numero_serie} onChange={e=>setF({...f,numero_serie:e.target.value})}/></div>
+        <div><label>Catégorie</label>
+          <select value={f.categorie} onChange={e=>setF({...f,categorie:e.target.value})}>
+            <option value="">—</option>
+            {categories.map(c=><option key={c.id} value={c.id}>{c.nom||c.Nom}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="form-actions">
+        <button onClick={save}>{edit?'Enregistrer':'Ajouter'}</button>
+        {edit && <button className="sec" onClick={()=>{setEdit(null);setF({nom:'',numero_serie:'',categorie:''});}}>Annuler</button>}
+      </div>
+      <h3>Liste ({materiels.length})</h3>
+      {materiels.length===0 ? <div className="empty">Aucun matériel</div> :
+      <table><thead><tr><th>Nom</th><th>N° série</th><th>Catégorie</th><th></th></tr></thead><tbody>
+      {materiels.map(m=><tr key={m.id}>
+        <td>{m.nom||m.Nom}</td>
+        <td className="muted">{m.numero_serie||m.serie||'-'}</td>
+        <td>{getCatNom(m.categorie||m.categorie_id)||'-'}</td>
+        <td style={{textAlign:'right'}}>
+          <button className="sec sm" onClick={()=>editRow(m)}>✏️</button>{' '}
+          <button className="danger sm" onClick={()=>del(m.id)}>🗑️</button>
+        </td>
+      </tr>)}
+      </tbody></table>}
+    </div>
+  );
+}
+
+function AdminCat({categories,reload,notify}){
+  const [nom,setNom] = useState('');
+  const [edit,setEdit] = useState(null);
+  const save = async () => {
+    if(!nom){notify('err','Nom requis');return;}
+    try{
+      if(edit) await grist.docApi.applyUserActions([['UpdateRecord',TABLES.cat,edit,{nom}]]);
+      else await grist.docApi.applyUserActions([['AddRecord',TABLES.cat,null,{nom}]]);
+      setNom('');setEdit(null);await reload();notify('ok','OK');
+    }catch(e){notify('err',e.message);}
+  };
+  const del = async (id) => {
+    if(!confirm('Supprimer ?')) return;
+    try{await grist.docApi.applyUserActions([['RemoveRecord',TABLES.cat,id]]);await reload();notify('ok','Supprimé');}
+    catch(e){notify('err',e.message);}
+  };
+  return (
+    <div className="card">
+      <h3>{edit?'Modifier':'Ajouter'} une catégorie</h3>
+      <div className="row">
+        <div><label>Nom *</label><input value={nom} onChange={e=>setNom(e.target.value)}/></div>
+      </div>
+      <div className="form-actions">
+        <button onClick={save}>{edit?'Enregistrer':'Ajouter'}</button>
+        {edit && <button className="sec" onClick={()=>{setEdit(null);setNom('');}}>Annuler</button>}
+      </div>
+      <h3>Liste ({categories.length})</h3>
+      {categories.length===0 ? <div className="empty">Aucune catégorie</div> :
+      <table><thead><tr><th>Nom</th><th></th></tr></thead><tbody>
+      {categories.map(c=><tr key={c.id}>
+        <td>{c.nom||c.Nom}</td>
+        <td style={{textAlign:'right'}}>
+          <button className="sec sm" onClick={()=>{setEdit(c.id);setNom(c.nom||c.Nom||'');}}>✏️</button>{' '}
+          <button className="danger sm" onClick={()=>del(c.id)}>🗑️</button>
+        </td>
+      </tr>)}
+      </tbody></table>}
+    </div>
+  );
+}
+
+function AdminCol({collaborateurs,reload,notify}){
+  const [f,setF] = useState({nom:'',email:'',role:'collaborateurs'});
+  const [edit,setEdit] = useState(null);
+  const save = async () => {
+    if(!f.nom||!f.email){notify('err','Nom et email requis');return;}
+    try{
+      if(edit) await grist.docApi.applyUserActions([['UpdateRecord',TABLES.col,edit,f]]);
+      else await grist.docApi.applyUserActions([['AddRecord',TABLES.col,null,f]]);
+      setF({nom:'',email:'',role:'collaborateurs'});setEdit(null);
+      await reload();notify('ok','OK');
+    }catch(e){notify('err',e.message);}
+  };
+  const del = async (id) => {
+    if(!confirm('Supprimer ?')) return;
+    try{await grist.docApi.applyUserActions([['RemoveRecord',TABLES.col,id]]);await reload();notify('ok','Supprimé');}
+    catch(e){notify('err',e.message);}
+  };
+  return (
+    <div className="card">
+      <h3>{edit?'Modifier':'Ajouter'} un collaborateur</h3>
+      <div className="row">
+        <div><label>Nom *</label><input value={f.nom} onChange={e=>setF({...f,nom:e.target.value})}/></div>
+        <div><label>Email *</label><input value={f.email} onChange={e=>setF({...f,email:e.target.value})}/></div>
+        <div><label>Rôle</label>
+          <select value={f.role} onChange={e=>setF({...f,role:e.target.value})}>
+            <option value="collaborateurs">Collaborateur</option>
+            <option value="Admin">Admin</option>
+          </select>
+        </div>
+      </div>
+      <div className="form-actions">
+        <button onClick={save}>{edit?'Enregistrer':'Ajouter'}</button>
+        {edit && <button className="sec" onClick={()=>{setEdit(null);setF({nom:'',email:'',role:'collaborateurs'});}}>Annuler</button>}
+      </div>
+      <h3>Liste ({collaborateurs.length})</h3>
+      {collaborateurs.length===0 ? <div className="empty">Aucun collaborateur</div> :
+      <table><thead><tr><th>Nom</th><th>Email</th><th>Rôle</th><th></th></tr></thead><tbody>
+      {collaborateurs.map(c=><tr key={c.id}>
+        <td>{c.nom||c.Nom}</td>
+        <td className="muted">{c.email||c.Email}</td>
+        <td><span className="badge">{c.role||c.Role||'-'}</span></td>
+        <td style={{textAlign:'right'}}>
+          <button className="sec sm" onClick={()=>{setEdit(c.id);setF({nom:c.nom||c.Nom||'',email:c.email||c.Email||'',role:c.role||c.Role||'collaborateurs'});}}>✏️</button>{' '}
+          <button className="danger sm" onClick={()=>del(c.id)}>🗑️</button>
+        </td>
+      </tr>)}
+      </tbody></table>}
+    </div>
+  );
+}
+
+function AdminAff({affectations,collaborateurs,materiels,getCollabNom,getMatNom,reload,notify}){
+  const [f,setF] = useState({collaborateur:'',materiel:'',date_affectation:'',date_retour:''});
+  const toTs = (d) => d ? Math.floor(new Date(d).getTime()/1000) : null;
+  const save = async () => {
+    if(!f.collaborateur||!f.materiel){notify('err','Collaborateur et matériel requis');return;}
+    const data = {
+      collaborateur:parseInt(f.collaborateur),
+      materiel:parseInt(f.materiel),
+      date_affectation:toTs(f.date_affectation)||Math.floor(Date.now()/1000),
+      date_retour:toTs(f.date_retour)
+    };
+    try{
+      await grist.docApi.applyUserActions([['AddRecord',TABLES.aff,null,data]]);
+      setF({collaborateur:'',materiel:'',date_affectation:'',date_retour:''});
+      await reload();notify('ok','Affectation créée');
+    }catch(e){notify('err',e.message);}
+  };
+  const cloturer = async (id) => {
+    try{
+      awaitgrist.docApi.applyUserActions([['UpdateRecord',TABLES.aff,id,{date_retour:Math.floor(Date.now()/1000)}]]);
+      await reload();notify('ok','Clôturée');
+    }catch(e){notify('err',e.message);}
+  };
+  const del = async (id) => {
+    if(!confirm('Supprimer ?')) return;
+    try{await grist.docApi.applyUserActions([['RemoveRecord',TABLES.aff,id]]);await reload();notify('ok','Supprimé');}
+    catch(e){notify('err',e.message);}
+  };
+  return (
+    <div className="card">
+      <h3>Nouvelle affectation</h3>
+      <div className="row">
+        <div><label>Collaborateur *</label>
+          <select value={f.collaborateur} onChange={e=>setF({...f,collaborateur:e.target.value})}>
+            <option value="">—</option>
+            {collaborateurs.map(c=><option key={c.id} value={c.id}>{c.nom||c.Nom}</option>)}
+          </select>
+        </div>
+        <div><label>Matériel *</label>
+          <select value={f.materiel} onChange={e=>setF({...f,materiel:e.target.value})}>
+            <option value="">—</option>
+            {materiels.map(m=><option key={m.id} value={m.id}>{m.nom||m.Nom}</option>)}
+          </select>
+        </div>
+        <div><label>Date affectation</label><input type="date" value={f.date_affectation} onChange={e=>setF({...f,date_affectation:e.target.value})}/></div>
+        <div><label>Date retour</label><input type="date" value={f.date_retour} onChange={e=>setF({...f,date_retour:e.target.value})}/></div>
+      </div>
+      <div className="form-actions"><button onClick={save}>Créer</button></div>
+      <h3>Liste ({affectations.length})</h3>
+      {affectations.length===0 ? <div className="empty">Aucune affectation</div> :
+      <table><thead><tr>
+        <th>Collaborateur</th><th>Matériel</th><th>Affectation</th><th>Retour</th><th>Statut</th><th></th>
+      </tr></thead><tbody>
+      {affectations.map(a=><tr key={a.id}>
+        <td>{getCollabNom(a.collaborateur||a.collaborateur_id)}</td>
+        <td>{getMatNom(a.materiel||a.materiel_id)}</td>
+        <td>{a.date_affectation ? new Date(a.date_affectation*1000).toLocaleDateString() : '-'}</td>
+        <td>{a.date_retour ? new Date(a.date_retour*1000).toLocaleDateString() : '-'}</td>
+        <td>{a.date_retour ? <span className="badge">Clôturée</span> : <span className="badge ok">En cours</span>}</td>
+        <td style={{textAlign:'right'}}>
+          {!a.date_retour && <button className="sec sm" onClick={()=>cloturer(a.id)}>Clôturer</button>}{' '}
+          <button className="danger sm" onClick={()=>del(a.id)}>🗑️</button>
+        </td>
+      </tr>)}
+      </tbody></table>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
