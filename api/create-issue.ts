@@ -3,10 +3,17 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
+interface Contact {
+  name: string;
+  email: string;
+  jobTitle?: string;
+}
+
 interface RequestBody {
   nom_module: string;
   description: string;
   type_app: string;
+  contact?: Contact;
 }
 
 export default async function handler(
@@ -29,7 +36,7 @@ export default async function handler(
 
   try {
     // Parse request body (already parsed by Vercel)
-    const { nom_module, description, type_app } = req.body as RequestBody;
+    const { nom_module, description, type_app, contact } = req.body as RequestBody;
 
     // Validate
     if (!nom_module || !description || !type_app) {
@@ -40,6 +47,10 @@ export default async function handler(
     const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
     const GITHUB_OWNER = process.env.GITHUB_OWNER;
     const GITHUB_REPO = process.env.GITHUB_REPO || 'grist-widget-generator';
+    const GRIST_API_URL = process.env.GRIST_API_URL;
+    const GRIST_API_KEY = process.env.GRIST_API_KEY;
+    const GRIST_DOC_ID  = process.env.GRIST_DOC_ID;
+    const GRIST_TABLE_ID = process.env.GRIST_TABLE_ID || 'Demandes';
 
     if (!GITHUB_TOKEN || !GITHUB_OWNER) {
       console.error('Missing environment variables');
@@ -78,6 +89,32 @@ export default async function handler(
     }
 
     const issue = await githubResponse.json();
+
+    // Store contact info in Grist (private, not visible on public GitHub)
+    if (contact?.email && GRIST_API_URL && GRIST_API_KEY && GRIST_DOC_ID) {
+      await fetch(
+        `${GRIST_API_URL}/api/docs/${GRIST_DOC_ID}/tables/${GRIST_TABLE_ID}/records`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${GRIST_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            records: [{
+              fields: {
+                Nom:            contact.name,
+                Email:          contact.email,
+                Fonction:       contact.jobTitle || '',
+                Widget_demande: nom_module,
+                Issue_url:      issue.html_url,
+                Date_demande:   new Date().toISOString(),
+              },
+            }],
+          }),
+        }
+      ).catch(err => console.error('Failed to store contact in Grist:', err));
+    }
 
     // Compute widget URLs (mirrors workflow slug logic)
     const slug = nom_module.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 40);

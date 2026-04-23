@@ -49,6 +49,7 @@ jobs:
           ISSUE_BODY: ${{ github.event.issue.body }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          ls *.grist 2>/dev/null | sort > /tmp/grist_before.txt
           printf '%s' "$ISSUE_BODY" > /tmp/spec_body.txt
           python3 generate.py \
             "$ISSUE_TITLE" \
@@ -57,6 +58,13 @@ jobs:
             "default.grist" \
             "skills-repo/01-skills-universels" \
             "${{ steps.slug.outputs.widget_url }}"
+          GENERATED=$(comm -13 /tmp/grist_before.txt <(ls *.grist 2>/dev/null | sort) | head -1)
+          if [ -n "$GENERATED" ]; then
+            echo "generated_grist=$GENERATED" >> $GITHUB_ENV
+            echo "✅ Fichier généré : $GENERATED"
+          else
+            echo "⚠️  Aucun nouveau .grist trouvé"
+          fi
 
       # 6. Publier widget.html + widget.grist dans le repo (GitHub Pages)
       - name: Publier widget HTML
@@ -70,12 +78,12 @@ jobs:
           else
             echo "⚠️  widget.html absent"
           fi
-          GRIST=$(ls *.grist 2>/dev/null | head -1)
-          if [ -n "$GRIST" ]; then
-            cp "$GRIST" "widgets/$SLUG/widget.grist"
+          if [ -n "$generated_grist" ] && [ -f "$generated_grist" ]; then
+            cp "$generated_grist" "widgets/$SLUG/widget.grist"
             STAGED=1
+            echo "✅ .grist copié : $generated_grist"
           else
-            echo "⚠️  .grist absent"
+            echo "⚠️  .grist absent ou non identifié"
           fi
           printf '{"issue_number":%s}' "${{ github.event.issue.number }}" > "widgets/$SLUG/info.json"
           STAGED=1

@@ -402,6 +402,7 @@
                 <div class="progress-step" data-step="3">3</div>
                 <div class="progress-step" data-step="4">4</div>
                 <div class="progress-step" data-step="5">5</div>
+                <div class="progress-step" data-step="6">6</div>
             </div>
             <div class="progress-labels">
                 <span class="progress-label active">Besoin</span>
@@ -409,6 +410,7 @@
                 <span class="progress-label">User Stories</span>
                 <span class="progress-label">Droits</span>
                 <span class="progress-label">Écrans</span>
+                <span class="progress-label">Contact</span>
             </div>
         </div>
         
@@ -460,6 +462,23 @@
                 <div id="screensContainer"></div>
             </div>
             
+            <!-- Step 6: Contact -->
+            <div class="step" data-step="6">
+                <div class="step-title">📬 Vos coordonnées</div>
+                <div class="step-description">Nos équipes vous contacteront pour vous faire une démo personnalisée.</div>
+
+                <label for="contactName">Nom complet *</label>
+                <input type="text" id="contactName" placeholder="Ex : Jean Dupont" required style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;margin-bottom:16px;">
+
+                <label for="contactEmail">Email professionnel *</label>
+                <input type="email" id="contactEmail" placeholder="Ex : jean.dupont@entreprise.fr" required style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;margin-bottom:16px;">
+
+                <label for="contactJobTitle">Fonction</label>
+                <input type="text" id="contactJobTitle" placeholder="Ex : Responsable RH, Chef de projet…" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;margin-bottom:16px;">
+
+                <p style="font-size:12px;color:#9ca3af;margin-top:4px;">🔒 Vos coordonnées sont utilisées uniquement pour vous recontacter et ne sont pas partagées publiquement.</p>
+            </div>
+
             <!-- Navigation -->
             <div class="nav-buttons">
                 <button type="button" class="btn-secondary" id="prevBtn" onclick="prevStep()" style="display: none;">
@@ -469,7 +488,7 @@
                     Suivant →
                 </button>
                 <button type="submit" class="btn-primary" id="submitBtn" style="display: none;">
-                    ✨ Générer mon widget
+                    ✉️ Envoyer ma demande
                 </button>
             </div>
         </form>
@@ -483,7 +502,7 @@
         const ANALYZE_API_URL = 'https://grist-widget-generator.vercel.app/api/analyze-spec';
         
         let currentStep = 1;
-        const totalSteps = 5;
+        const totalSteps = 6;
         let roles = [];
         let tables = [];
         let suggestedPermissions = {};
@@ -653,6 +672,15 @@
                 const hasContent = Array.from(blocks).some(b => b.querySelector('.screen-name').value.trim());
                 if (!hasContent) {
                     alert('Veuillez décrire au moins un écran');
+                    return false;
+                }
+            }
+            if (step === 6) {
+                const name = document.getElementById('contactName').value.trim();
+                const email = document.getElementById('contactEmail').value.trim();
+                if (!name) { alert('Veuillez saisir votre nom'); return false; }
+                if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                    alert('Veuillez saisir une adresse email valide');
                     return false;
                 }
             }
@@ -896,9 +924,9 @@
         
         document.getElementById('specForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
-            if (!validateStep(5)) return;
-            
+
+            if (!validateStep(6)) return;
+
             // Collecter toutes les données
             const spec = {
                 description: document.getElementById('description').value.trim(),
@@ -908,12 +936,10 @@
                 permissions: {},
                 screens: collectScreens()
             };
-            
-            // User stories
+
             const userStoriesStrings = collectUserStories();
             roles.forEach(role => { spec.userStories[role] = userStoriesStrings[role] || ''; });
-            
-            // Permissions (nouvelle structure : par table et par rôle)
+
             tables.forEach(table => {
                 spec.permissions[table] = {};
                 roles.forEach(role => {
@@ -921,15 +947,16 @@
                     spec.permissions[table][role] = Array.from(checkboxes).map(cb => cb.value);
                 });
             });
-            
-            console.log('Spec collectée:', spec);
 
-            const submitBtn = document.getElementById('submitBtn');
-            const prevBtn = document.getElementById('prevBtn');
-            submitBtn.disabled = true;
-            prevBtn.style.display = 'none';
+            const contact = {
+                name: document.getElementById('contactName').value.trim(),
+                email: document.getElementById('contactEmail').value.trim(),
+                jobTitle: document.getElementById('contactJobTitle').value.trim(),
+            };
 
-            enterGenerationMode();
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('prevBtn').style.display = 'none';
+            showSubmittingPanel();
 
             try {
                 const response = await fetch(EDGE_FUNCTION_URL, {
@@ -938,156 +965,48 @@
                     body: JSON.stringify({
                         nom_module: spec.description.split('.')[0].substring(0, 50),
                         description: JSON.stringify(spec, null, 2),
-                        type_app: 'custom'
+                        type_app: 'custom',
+                        contact
                     })
                 });
 
                 if (!response.ok) throw new Error('Erreur API');
 
-                const result = await response.json();
-
-                updateGenStep('issue', result.issue_number, result.issue_url);
-                await pollForWidget(result.widget_url, result.grist_url, result.issue_url, result.issue_number);
+                showSuccessPanel(contact.name, contact.email);
 
             } catch (error) {
-                exitGenerationMode();
-                showStatus('error', `❌ Erreur : ${error.message}`);
-                submitBtn.disabled = false;
-                prevBtn.style.display = 'block';
+                document.getElementById('specForm').style.display = '';
+                document.querySelector('.progress-container').style.display = '';
+                document.getElementById('status').style.display = 'none';
+                document.getElementById('submitBtn').disabled = false;
+                document.getElementById('prevBtn').style.display = 'block';
+                alert(`❌ Une erreur est survenue : ${error.message}`);
             }
         });
 
-        function enterGenerationMode() {
+        function showSubmittingPanel() {
             document.getElementById('specForm').style.display = 'none';
             document.querySelector('.progress-container').style.display = 'none';
             const statusDiv = document.getElementById('status');
+            statusDiv.style.display = 'block';
             statusDiv.className = 'status generating';
             statusDiv.innerHTML = `
                 <div class="gen-spinner"></div>
-                <h3 style="text-align:center;margin:0 0 20px;color:#1e293b;font-size:17px;">Génération de votre widget…</h3>
-                <div id="genSteps" style="max-width:400px;margin:0 auto 16px;">
-                    <div class="gen-step active" id="genStepIssue">
-                        <span class="gen-icon">⏳</span>
-                        <div class="gen-label">Envoi de la demande…</div>
-                    </div>
-                    <div class="gen-step pending" id="genStepAI">
-                        <span class="gen-icon">🤖</span>
-                        <div class="gen-label">Génération IA (tables, widget, fichier .grist)</div>
-                    </div>
-                    <div class="gen-step pending" id="genStepPublish">
-                        <span class="gen-icon">🌐</span>
-                        <div class="gen-label">Publication sur GitHub Pages</div>
-                    </div>
-                    <div class="gen-step pending" id="genStepDownload">
-                        <span class="gen-icon">⬇️</span>
-                        <div class="gen-label">Téléchargement du .grist</div>
-                    </div>
-                </div>
-                <p id="genTimer" style="text-align:center;font-size:12px;color:#94a3b8;margin:0;">Généralement 2 à 5 minutes…</p>
+                <p style="text-align:center;color:#64748b;margin:0;">Envoi en cours…</p>
             `;
         }
 
-        function exitGenerationMode() {
-            document.getElementById('specForm').style.display = '';
-            document.querySelector('.progress-container').style.display = '';
-            document.getElementById('status').style.display = 'none';
-        }
-
-        function updateGenStep(step, issueNumber, issueUrl) {
-            if (step === 'issue') {
-                const el = document.getElementById('genStepIssue');
-                el.className = 'gen-step done';
-                el.innerHTML = `<span class="gen-icon">✅</span><div class="gen-label">Demande envoyée — <a href="${issueUrl}" target="_blank" style="color:rgb(23,207,136);">Issue #${issueNumber}</a></div>`;
-                const ai = document.getElementById('genStepAI');
-                ai.className = 'gen-step active';
-            }
-        }
-
-        async function pollForWidget(widgetUrl, gristUrl, issueUrl, issueNumber) {
-            if (!widgetUrl) {
-                exitGenerationMode();
-                showStatus('success', `✅ Demande créée ! <a href="${issueUrl}" target="_blank">Issue #${issueNumber}</a><br><small>Le widget sera disponible dans quelques minutes.</small>`);
-                document.getElementById('submitBtn').disabled = false;
-                document.getElementById('prevBtn').style.display = 'block';
-                return;
-            }
-
-            const maxAttempts = 40;
-            for (let i = 0; i < maxAttempts; i++) {
-                await sleep(15000);
-                const timerEl = document.getElementById('genTimer');
-                if (timerEl) timerEl.textContent = `Vérification en cours… (${i + 1}/${maxAttempts})`;
-
-                try {
-                    const resp = await fetch(widgetUrl + 'info.json?t=' + Date.now(), { cache: 'no-store' });
-                    if (resp.ok) {
-                        const info = await resp.json();
-                        // Vérifier que c'est bien notre génération (pas une ancienne)
-                        if (Number(info.issue_number) !== Number(issueNumber)) continue;
-
-                        const aiStep = document.getElementById('genStepAI');
-                        if (aiStep) { aiStep.className = 'gen-step done'; aiStep.querySelector('.gen-icon').textContent = '✅'; }
-                        const publish = document.getElementById('genStepPublish');
-                        if (publish) { publish.className = 'gen-step done'; publish.querySelector('.gen-icon').textContent = '✅'; }
-                        const dlStep = document.getElementById('genStepDownload');
-                        if (dlStep) { dlStep.className = 'gen-step active'; }
-
-                        await triggerGristDownload(gristUrl);
-
-                        showReadyPanel(widgetUrl, gristUrl, issueUrl, issueNumber);
-                        return;
-                    }
-                } catch (_) {}
-            }
-
-            // Timeout
-            exitGenerationMode();
-            showStatus('error',
-                `⏱️ La génération prend plus de temps que prévu.<br><br>` +
-                `Consultez l'<a href="${issueUrl}" target="_blank">Issue #${issueNumber}</a> pour suivre l'avancement, ` +
-                `puis revenez télécharger votre widget sur <a href="${widgetUrl}" target="_blank">cette page</a>.`
-            );
-            document.getElementById('submitBtn').style.display = 'block';
-            document.getElementById('submitBtn').disabled = false;
-            document.getElementById('prevBtn').style.display = 'block';
-        }
-
-        function showReadyPanel(widgetUrl, gristUrl, issueUrl, issueNumber) {
+        function showSuccessPanel(name, email) {
             const statusDiv = document.getElementById('status');
-            statusDiv.className = 'status generating';
             statusDiv.innerHTML = `
-                <div style="text-align:center;padding:8px 0 4px;">
-                    <div style="font-size:52px;margin-bottom:14px;">🎉</div>
-                    <h3 style="color:#166534;margin:0 0 6px;font-size:18px;">Widget prêt !</h3>
-                    <p style="color:#64748b;font-size:13px;margin:0 0 24px;">Le fichier .grist a été téléchargé automatiquement.</p>
-                    <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;">
-                        <a href="${gristUrl}" download="widget.grist" class="gen-btn gen-btn-primary">⬇️ Retélécharger le .grist</a>
-                        <a href="${widgetUrl}" target="_blank" class="gen-btn gen-btn-secondary">🌐 Voir le widget</a>
-                        <a href="${issueUrl}" target="_blank" class="gen-btn" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;">🔗 Issue #${issueNumber}</a>
-                    </div>
+                <div style="text-align:center;padding:16px 0;">
+                    <div style="font-size:52px;margin-bottom:16px;">🎉</div>
+                    <h3 style="color:#166534;margin:0 0 10px;font-size:20px;">Merci, ${escapeAttr(name)} !</h3>
+                    <p style="color:#374151;margin:0 0 8px;font-size:15px;">Votre demande a bien été reçue.</p>
+                    <p style="color:#6b7280;font-size:14px;margin:0;">Nos équipes vous contacteront à <strong>${escapeAttr(email)}</strong><br>pour vous faire une démo personnalisée.</p>
                 </div>
             `;
-            document.getElementById('submitBtn').style.display = 'none';
         }
-
-        async function triggerGristDownload(url) {
-            try {
-                const resp = await fetch(url, { cache: 'no-store' });
-                if (!resp.ok) throw new Error();
-                const blob = await resp.blob();
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = 'widget.grist';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-            } catch (_) {
-                window.open(url, '_blank');
-            }
-        }
-
-        function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
         function showStatus(type, message) {
             const statusDiv = document.getElementById('status');
