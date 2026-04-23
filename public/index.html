@@ -419,15 +419,9 @@
             <!-- Step 5: Description écrans -->
             <div class="step" data-step="5">
                 <div class="step-title">🖥️ Description des écrans</div>
-                <div class="step-description">Décrivez l'interface et les écrans que vous souhaitez voir dans votre widget.</div>
-                
-                <label for="screens">Description des écrans *</label>
-                <textarea 
-                    id="screens" 
-                    name="screens" 
-                    placeholder="Ex: Un kanban avec 3 colonnes (À planifier, En cours, Terminé), des cartes avec nom du collaborateur, date d'entretien, et statut..."
-                    required
-                ></textarea>
+                <div class="step-description">Décrivez chaque écran que vous souhaitez voir dans votre widget.</div>
+
+                <div id="screensContainer"></div>
             </div>
             
             <!-- Navigation -->
@@ -469,7 +463,7 @@
             if (currentStep === 1) formData.description = document.getElementById('description').value.trim();
             if (currentStep === 2) formData.roles = Array.from(document.querySelectorAll('#rolesList input')).map(i => i.value.trim()).filter(r => r);
             if (currentStep === 3) collectUserStories();
-            if (currentStep === 5) formData.screens = document.getElementById('screens').value.trim();
+            if (currentStep === 5) collectScreens();
         }
         
         // Initialize with one empty role
@@ -510,7 +504,10 @@
             if (step === 4) {
                 generatePermissionsFields();
             }
-            
+            if (step === 5) {
+                generateScreensFields();
+            }
+
             updateProgress();
         }
         
@@ -614,9 +611,10 @@
                 }
             }
             if (step === 5) {
-                const screens = document.getElementById('screens').value.trim();
-                if (!screens) {
-                    alert('Veuillez décrire les écrans souhaités');
+                const blocks = document.querySelectorAll('.screen-block');
+                const hasContent = Array.from(blocks).some(b => b.querySelector('.screen-name').value.trim());
+                if (!hasContent) {
+                    alert('Veuillez décrire au moins un écran');
                     return false;
                 }
             }
@@ -710,6 +708,87 @@
             });
         }
         
+        const SCREEN_TYPES = ['Liste', 'Kanban', 'Formulaire', 'Tableau de bord', 'Calendrier', 'Autre'];
+
+        const MAX_SCREENS = 3;
+
+        function updateScreenAddBtn() {
+            const count = document.querySelectorAll('.screen-block').length;
+            const btn = document.getElementById('screenAddBtn');
+            const note = document.getElementById('screenLimitNote');
+            if (!btn) return;
+            btn.style.display = count >= MAX_SCREENS ? 'none' : 'inline-block';
+            if (note) note.style.display = count >= MAX_SCREENS ? 'block' : 'none';
+        }
+
+        function removeScreenBlock(btn) {
+            btn.closest('.screen-block').remove();
+            updateScreenAddBtn();
+        }
+
+        function addScreenBlock(name = '', type = '', description = '') {
+            if (document.querySelectorAll('.screen-block').length >= MAX_SCREENS) return;
+            const container = document.getElementById('screensContainer');
+            const block = document.createElement('div');
+            block.className = 'screen-block';
+            block.style.cssText = 'background:white;border:1px solid #e0e0e0;border-radius:8px;padding:14px 16px;margin-bottom:12px;display:flex;flex-direction:column;gap:10px;';
+            const typeOptions = SCREEN_TYPES.map(t =>
+                `<option value="${t}"${t === type ? ' selected' : ''}>${t}</option>`
+            ).join('');
+            block.innerHTML = `
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                    <input type="text" class="screen-name" placeholder="Nom de l'écran (ex: Vue Kanban)" value="${escapeAttr(name)}" style="flex:1;min-width:160px;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-weight:600;">
+                    <select class="screen-type" style="padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;color:#555;background:white;">
+                        <option value="" disabled${!type ? ' selected' : ''}>Type de vue…</option>
+                        ${typeOptions}
+                    </select>
+                    <button type="button" onclick="removeScreenBlock(this)" style="padding:4px 10px;background:#fee2e2;border:none;border-radius:4px;color:#dc2626;cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;">×</button>
+                </div>
+                <input type="text" class="screen-desc" placeholder="Décrivez le contenu et les interactions (colonnes affichées, filtres, actions...)" value="${escapeAttr(description)}" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box;">
+            `;
+            const footer = container.querySelector('#screenAddBtn')?.parentElement;
+            container.insertBefore(block, footer || null);
+            updateScreenAddBtn();
+        }
+
+        function collectScreens() {
+            const blocks = document.querySelectorAll('.screen-block');
+            const items = [];
+            const lines = [];
+            blocks.forEach(block => {
+                const name = block.querySelector('.screen-name').value.trim();
+                const type = block.querySelector('.screen-type').value;
+                const desc = block.querySelector('.screen-desc').value.trim();
+                items.push({ name, type, description: desc });
+                if (name) {
+                    let line = `Écran "${name}"`;
+                    if (type) line += ` (${type})`;
+                    if (desc) line += ` : ${desc}`;
+                    lines.push(line);
+                }
+            });
+            formData.screens = items;
+            return lines.join('\n');
+        }
+
+        function generateScreensFields() {
+            const container = document.getElementById('screensContainer');
+            container.innerHTML = '';
+            const saved = formData.screens;
+            if (Array.isArray(saved) && saved.length > 0) {
+                saved.forEach(s => addScreenBlock(s.name || '', s.type || '', s.description || ''));
+            } else {
+                addScreenBlock();
+            }
+            const footer = document.createElement('div');
+            footer.innerHTML = `
+                <button type="button" id="screenAddBtn" onclick="addScreenBlock()" style="padding:8px 16px;background:#f0fdf4;border:1px dashed rgb(23,207,136);border-radius:6px;color:rgb(23,207,136);cursor:pointer;font-size:13px;">+ Ajouter un écran</button>
+                <p id="screenLimitNote" style="display:none;margin-top:8px;font-size:12px;color:#999;">Maximum ${MAX_SCREENS} écrans — il s'agit d'un prototype.</p>
+            `;
+            container.appendChild(footer);
+            updateScreenAddBtn();
+        }
+
         function generatePermissionsFields() {
             const container = document.getElementById('permissionsContainer');
             container.innerHTML = '';
@@ -779,7 +858,7 @@
                 tables: tables,
                 userStories: {},
                 permissions: {},
-                screens: document.getElementById('screens').value.trim()
+                screens: collectScreens()
             };
             
             // User stories
