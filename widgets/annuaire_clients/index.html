@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Annuaire Clients</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f6f8;color:#222;font-size:14px}
+.app{padding:16px;max-width:1400px;margin:0 auto}
+.tabs{display:flex;gap:4px;border-bottom:2px solid #ddd;margin-bottom:16px}
+.tab{padding:10px 18px;cursor:pointer;border:none;background:none;font-size:14px;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px}
+.tab.active{color:#1976d2;border-bottom-color:#1976d2;font-weight:600}
+.card{background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;margin-bottom:16px}
+.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.search{flex:1;min-width:200px;padding:8px 12px;border:1px solid #ccc;border-radius:6px;font-size:14px}
+.btn{padding:8px 14px;border:none;border-radius:6px;background:#1976d2;color:#fff;cursor:pointer;font-size:13px}
+.btn:hover{background:#1565c0}
+.btn.sec{background:#e0e0e0;color:#333}
+.btn.sec:hover{background:#d0d0d0}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #eee}
+th{background:#fafafa;font-weight:600;color:#555;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:#f8faff}
+.badge{display:inline-block;padding:3px 8px;border-radius:10px;background:#e3f2fd;color:#1976d2;font-size:11px;font-weight:600}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal{background:#fff;border-radius:8px;padding:24px;width:90%;max-width:520px;max-height:90vh;overflow:auto}
+.modal h2{margin-bottom:16px;font-size:18px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:#666;margin-bottom:4px;font-weight:600}
+.field input,.field textarea,.field select{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:5px;font-size:14px;font-family:inherit}
+.field textarea{resize:vertical;min-height:70px}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.dash{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+.stat{background:#fff;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.stat .v{font-size:28px;font-weight:700;color:#1976d2}
+.stat .l{font-size:12px;color:#666;text-transform:uppercase;margin-top:4px}
+.toast{position:fixed;top:16px;right:16px;padding:10px 16px;border-radius:6px;color:#fff;z-index:200;font-size:13px}
+.toast.ok{background:#4caf50}
+.toast.err{background:#e53935}
+.empty{text-align:center;padding:40px;color:#999}
+.role{font-size:11px;color:#888;margin-left:8px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef}=React;
+const toRows=(t)=>{const ids=t.id||[];return ids.map((id,i)=>{const r={id};Object.keys(t).forEach(k=>{if(k!=='id')r[k]=t[k][i]});return r})};
+
+function App(){
+  const [tab,setTab]=useState('list');
+  const [clients,setClients]=useState([]);
+  const [users,setUsers]=useState([]);
+  const [roles,setRoles]=useState([]);
+  const [search,setSearch]=useState('');
+  const [sel,setSel]=useState(null);
+  const [toast,setToast]=useState(null);
+  const [me,setMe]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const tm=useRef(null);
+
+  const notify=(type,msg)=>{setToast({type,msg});if(tm.current)clearTimeout(tm.current);tm.current=setTimeout(()=>setToast(null),2800)};
+
+  const load=async()=>{
+    try{
+      const c=toRows(await grist.docApi.fetchTable('Client'));
+      setClients(c);
+      try{setUsers(toRows(await grist.docApi.fetchTable('Utilisateur')))}catch(e){}
+      try{setRoles(toRows(await grist.docApi.fetchTable('Role')))}catch(e){}
+    }catch(e){notify('err','Erreur chargement: '+e.message)}
+    setLoading(false);
+  };
+
+  useEffect(()=>{
+    grist.ready({requiredAccess:'full'});
+    grist.onRecords(async(records)=>{
+      if(records&&records[0])setMe(records[0]);
+      await load();
+    });
+    grist.onRecord(async(r)=>{if(r)setSel(r)});
+  },[]);
+
+  const save=async()=>{
+    if(!sel)return;
+    const {id,...fields}=sel;
+    try{
+      if(id){
+        await grist.docApi.applyUserActions([['UpdateRecord','Client',id,fields]]);
+        notify('ok','Client mis à jour');
+      }else{
+        await grist.docApi.applyUserActions([['AddRecord','Client',null,fields]]);
+        notify('ok','Client ajouté');
+      }
+      setSel(null);
+      await load();
+    }catch(e){notify('err','Erreur: '+e.message)}
+  };
+
+  const del=async()=>{
+    if(!sel||!sel.id)return;
+    if(!confirm('Supprimer ce client ?'))return;
+    try{
+      await grist.docApi.applyUserActions([['RemoveRecord','Client',sel.id]]);
+      notify('ok','Supprimé');
+      setSel(null);
+      await load();
+    }catch(e){notify('err','Erreur: '+e.message)}
+  };
+
+  const cols=clients[0]?Object.keys(clients[0]).filter(k=>!k.startsWith('gristHelper_')&&!k.startsWith('manualSort')):[];
+  const displayCols=cols.filter(c=>c!=='id').slice(0,6);
+
+  const filtered=clients.filter(c=>{
+    if(!search)return true;
+    const s=search.toLowerCase();
+    return Object.values(c).some(v=>String(v||'').toLowerCase().includes(s));
+  });
+
+  const stats={
+    total:clients.length,
+    users:users.length,
+    roles:roles.length,
+    filtered:filtered.length
+  };
+
+  return(
+    <div className="app">
+      {toast&&<div className={`toast ${toast.type}`}>{toast.msg}</div>}
+      <div className="tabs">
+        <button className={`tab ${tab==='list'?'active':''}`} onClick={()=>setTab('list')}>📋 Clients</button>
+        <button className={`tab ${tab==='dash'?'active':''}`} onClick={()=>setTab('dash')}>📊 Dashboard</button>
+        {me&&me.email&&<span className="role">Connecté: {me.email}</span>}
+      </div>
+
+      {tab==='dash'&&(
+        <div>
+          <div className="dash">
+            <div className="stat"><div className="v">{stats.total}</div><div className="l">Clients</div></div>
+            <div className="stat"><div className="v">{stats.users}</div><div className="l">Utilisateurs</div></div>
+            <div className="stat"><div className="v">{stats.roles}</div><div className="l">Rôles</div></div>
+          </div>
+          <div className="card">
+            <h3 style={{marginBottom:12}}>Derniers clients</h3>
+            {clients.slice(-5).reverse().map(c=>(
+              <div key={c.id} style={{padding:'8px 0',borderBottom:'1px solid #eee'}}>
+                <strong>{c.nom||c.Nom||c.name||`Client #${c.id}`}</strong>
+                {c.email&&<span style={{color:'#666',marginLeft:8}}>— {c.email}</span>}
+              </div>
+            ))}
+            {clients.length===0&&<div className="empty">Aucun client</div>}
+          </div>
+        </div>
+      )}
+
+      {tab==='list'&&(
+        <div className="card">
+          <div className="toolbar">
+            <input className="search" placeholder="🔍 Rechercher..." value={search} onChange={e=>setSearch(e.target.value)}/>
+            <span className="badge">{filtered.length} / {clients.length}</span>
+            <button className="btn" onClick={()=>{
+              const empty={id:null};
+              displayCols.forEach(k=>empty[k]='');
+              setSel(empty);
+            }}>+ Nouveau</button>
+          </div>
+          {loading?<div className="empty">Chargement...</div>:
+          filtered.length===0?<div className="empty">Aucun client trouvé</div>:
+          <div style={{overflowX:'auto'}}>
+            <table>
+              <thead><tr>{displayCols.map(c=><th key={c}>{c}</th>)}</tr></thead>
+              <tbody>
+                {filtered.map(c=>(
+                  <tr key={c.id} onClick={()=>setSel({...c})}>
+                    {displayCols.map(col=>(
+                      <td key={col}>{String(c[col]??'—').slice(0,80)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>}
+        </div>
+      )}
+
+      {sel&&(
+        <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget)setSel(null)}}>
+          <div className="modal">
+            <h2>{sel.id?`Client #${sel.id}`:'Nouveau client'}</h2>
+            {displayCols.map(col=>(
+              <div className="field" key={col}>
+                <label>{col}</label>
+                <input value={sel[col]??''} onChange={e=>setSel({...sel,[col]:e.target.value})}/>
+              </div>
+            ))}
+            <div className="modal-actions">
+              {sel.id&&<button className="btn sec" onClick={del} style={{background:'#e53935',color:'#fff'}}>Supprimer</button>}
+              <button className="btn sec" onClick={()=>setSel(null)}>Annuler</button>
+              <button className="btn" onClick={save}>Enregistrer</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
