@@ -77,6 +77,8 @@ jobs:
           else
             echo "⚠️  .grist absent"
           fi
+          printf '{"issue_number":%s}' "${{ github.event.issue.number }}" > "widgets/$SLUG/info.json"
+          STAGED=1
           if [ "$STAGED" = "1" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"

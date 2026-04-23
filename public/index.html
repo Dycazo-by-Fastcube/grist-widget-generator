@@ -929,7 +929,7 @@
             submitBtn.disabled = true;
             prevBtn.style.display = 'none';
 
-            showGeneratingPanel();
+            enterGenerationMode();
 
             try {
                 const response = await fetch(EDGE_FUNCTION_URL, {
@@ -950,19 +950,22 @@
                 await pollForWidget(result.widget_url, result.grist_url, result.issue_url, result.issue_number);
 
             } catch (error) {
+                exitGenerationMode();
                 showStatus('error', `❌ Erreur : ${error.message}`);
                 submitBtn.disabled = false;
                 prevBtn.style.display = 'block';
             }
         });
 
-        function showGeneratingPanel() {
+        function enterGenerationMode() {
+            document.getElementById('specForm').style.display = 'none';
+            document.querySelector('.progress-container').style.display = 'none';
             const statusDiv = document.getElementById('status');
             statusDiv.className = 'status generating';
             statusDiv.innerHTML = `
                 <div class="gen-spinner"></div>
                 <h3 style="text-align:center;margin:0 0 20px;color:#1e293b;font-size:17px;">Génération de votre widget…</h3>
-                <div id="genSteps" style="max-width:380px;margin:0 auto 16px;">
+                <div id="genSteps" style="max-width:400px;margin:0 auto 16px;">
                     <div class="gen-step active" id="genStepIssue">
                         <span class="gen-icon">⏳</span>
                         <div class="gen-label">Envoi de la demande…</div>
@@ -984,6 +987,12 @@
             `;
         }
 
+        function exitGenerationMode() {
+            document.getElementById('specForm').style.display = '';
+            document.querySelector('.progress-container').style.display = '';
+            document.getElementById('status').style.display = 'none';
+        }
+
         function updateGenStep(step, issueNumber, issueUrl) {
             if (step === 'issue') {
                 const el = document.getElementById('genStepIssue');
@@ -996,6 +1005,7 @@
 
         async function pollForWidget(widgetUrl, gristUrl, issueUrl, issueNumber) {
             if (!widgetUrl) {
+                exitGenerationMode();
                 showStatus('success', `✅ Demande créée ! <a href="${issueUrl}" target="_blank">Issue #${issueNumber}</a><br><small>Le widget sera disponible dans quelques minutes.</small>`);
                 document.getElementById('submitBtn').disabled = false;
                 document.getElementById('prevBtn').style.display = 'block';
@@ -1009,9 +1019,14 @@
                 if (timerEl) timerEl.textContent = `Vérification en cours… (${i + 1}/${maxAttempts})`;
 
                 try {
-                    const resp = await fetch(widgetUrl + 'index.html?t=' + Date.now(), { cache: 'no-store' });
+                    const resp = await fetch(widgetUrl + 'info.json?t=' + Date.now(), { cache: 'no-store' });
                     if (resp.ok) {
-                        // Mise à jour des étapes finales
+                        const info = await resp.json();
+                        // Vérifier que c'est bien notre génération (pas une ancienne)
+                        if (Number(info.issue_number) !== Number(issueNumber)) continue;
+
+                        const aiStep = document.getElementById('genStepAI');
+                        if (aiStep) { aiStep.className = 'gen-step done'; aiStep.querySelector('.gen-icon').textContent = '✅'; }
                         const publish = document.getElementById('genStepPublish');
                         if (publish) { publish.className = 'gen-step done'; publish.querySelector('.gen-icon').textContent = '✅'; }
                         const dlStep = document.getElementById('genStepDownload');
@@ -1026,11 +1041,13 @@
             }
 
             // Timeout
+            exitGenerationMode();
             showStatus('error',
                 `⏱️ La génération prend plus de temps que prévu.<br><br>` +
                 `Consultez l'<a href="${issueUrl}" target="_blank">Issue #${issueNumber}</a> pour suivre l'avancement, ` +
                 `puis revenez télécharger votre widget sur <a href="${widgetUrl}" target="_blank">cette page</a>.`
             );
+            document.getElementById('submitBtn').style.display = 'block';
             document.getElementById('submitBtn').disabled = false;
             document.getElementById('prevBtn').style.display = 'block';
         }
