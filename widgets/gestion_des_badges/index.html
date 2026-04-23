@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Gestion des badges</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f6f8;color:#222;font-size:14px}
+.app{padding:16px;max-width:1200px;margin:0 auto}
+h1{font-size:20px;margin:0 0 16px}
+.tabs{display:flex;gap:4px;border-bottom:2px solid #ddd;margin-bottom:16px}
+.tabs button{background:none;border:none;padding:8px 16px;cursor:pointer;font-size:14px;border-bottom:2px solid transparent;margin-bottom:-2px}
+.tabs button.active{border-color:#0b7;color:#0b7;font-weight:600}
+.bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px}
+.bar input{flex:1;padding:6px 10px;border:1px solid #ccc;border-radius:4px}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #eee}
+th{background:#fafafa;font-weight:600;font-size:12px;text-transform:uppercase;color:#555}
+tr:hover td{background:#f9fafb}
+button{cursor:pointer;border:none;border-radius:4px;padding:6px 12px;font-size:13px}
+.btn-p{background:#0b7;color:#fff}
+.btn-p:hover{background:#096}
+.btn-s{background:#eee;color:#333}
+.btn-d{background:#e53;color:#fff}
+.btn-icon{background:none;padding:4px 6px;font-size:14px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:10}
+.modal-box{background:#fff;border-radius:8px;padding:20px;width:90%;max-width:460px}
+.modal h2{margin:0 0 12px;font-size:16px}
+.field{margin-bottom:10px}
+.field label{display:block;font-size:12px;color:#555;margin-bottom:3px}
+.field input,.field select,.field textarea{width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-size:14px;font-family:inherit}
+.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+.toast{position:fixed;top:16px;right:16px;padding:10px 16px;border-radius:6px;color:#fff;z-index:20}
+.toast.ok{background:#0b7}.toast.err{background:#e53}
+.empty{padding:24px;text-align:center;color:#888}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;background:#e0f2ec;color:#0b7;font-size:12px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef}=React;
+const toRows=t=>{const ids=t.id||[];return ids.map((id,i)=>{const r={id};Object.keys(t).forEach(k=>{if(k!=='id')r[k]=t[k][i]});return r})};
+
+function App(){
+  const [tab,setTab]=useState('badges');
+  const [badges,setBadges]=useState([]);
+  const [users,setUsers]=useState([]);
+  const [attribs,setAttribs]=useState([]);
+  const [q,setQ]=useState('');
+  const [modal,setModal]=useState(null);
+  const [toast,setToast]=useState(null);
+  const tt=useRef(null);
+
+  const notify=(type,msg)=>{setToast({type,msg});if(tt.current)clearTimeout(tt.current);tt.current=setTimeout(()=>setToast(null),2500)};
+
+  const load=async()=>{
+    try{
+      const [b,u,a]=await Promise.all([
+        grist.docApi.fetchTable('Badge').catch(()=>({id:[]})),
+        grist.docApi.fetchTable('Utilisateur').catch(()=>({id:[]})),
+        grist.docApi.fetchTable('Attribution').catch(()=>({id:[]}))
+      ]);
+      setBadges(toRows(b));setUsers(toRows(u));setAttribs(toRows(a));
+    }catch(e){notify('err','Erreur chargement: '+e.message)}
+  };
+
+  useEffect(()=>{
+    grist.ready({requiredAccess:'full'});
+    grist.onRecords(()=>load());
+    load();
+  },[]);
+
+  const saveBadge=async d=>{
+    try{
+      if(d.id)await grist.docApi.applyUserActions([['UpdateRecord','Badge',d.id,{nom:d.nom,description:d.description}]]);
+      else await grist.docApi.applyUserActions([['AddRecord','Badge',null,{nom:d.nom,description:d.description}]]);
+      setModal(null);await load();notify('ok','Badge enregistré');
+    }catch(e){notify('err',e.message)}
+  };
+  const delBadge=async id=>{
+    if(!confirm('Supprimer ce badge ?'))return;
+    try{await grist.docApi.applyUserActions([['RemoveRecord','Badge',id]]);await load();notify('ok','Supprimé')}
+    catch(e){notify('err',e.message)}
+  };
+  const saveAttrib=async d=>{
+    try{
+      const data={badge_id:Number(d.badge_id),utilisateur_id:Number(d.utilisateur_id),date_attribution:d.date_attribution||null};
+      if(d.id)await grist.docApi.applyUserActions([['UpdateRecord','Attribution',d.id,data]]);
+      else await grist.docApi.applyUserActions([['AddRecord','Attribution',null,data]]);
+      setModal(null);await load();notify('ok','Attribution enregistrée');
+    }catch(e){notify('err',e.message)}
+  };
+  const delAttrib=async id=>{
+    if(!confirm('Supprimer cette attribution ?'))return;
+    try{await grist.docApi.applyUserActions([['RemoveRecord','Attribution',id]]);await load();notify('ok','Supprimé')}
+    catch(e){notify('err',e.message)}
+  };
+
+  const userLabel=id=>{const u=users.find(x=>x.id===id);if(!u)return '#'+id;return u.nom||u.name||u.email||'#'+id};
+  const badgeLabel=id=>{const b=badges.find(x=>x.id===id);return b?(b.nom||b.name||'#'+id):'#'+id};
+
+  const filt=(arr,fn)=>!q?arr:arr.filter(fn);
+  const fBadges=filt(badges,b=>(b.nom||'').toLowerCase().includes(q.toLowerCase())||(b.description||'').toLowerCase().includes(q.toLowerCase()));
+  const fAttribs=filt(attribs,a=>badgeLabel(a.badge_id).toLowerCase().includes(q.toLowerCase())||userLabel(a.utilisateur_id).toLowerCase().includes(q.toLowerCase()));
+
+  return (<div className="app">
+    <h1>Gestion des badges</h1>
+    <div className="tabs">
+      <button className={tab==='badges'?'active':''} onClick={()=>setTab('badges')}>Badges ({badges.length})</button>
+      <button className={tab==='attribs'?'active':''} onClick={()=>setTab('attribs')}>Attributions ({attribs.length})</button>
+    </div>
+
+    <div className="bar">
+      <input placeholder="Rechercher..." value={q} onChange={e=>setQ(e.target.value)}/>
+      {tab==='badges'&&<button className="btn-p" onClick={()=>setModal({type:'badge',data:{}})}>+ Nouveau badge</button>}
+      {tab==='attribs'&&<button className="btn-p" onClick={()=>setModal({type:'attrib',data:{}})}>+ Nouvelle attribution</button>}
+    </div>
+
+    {tab==='badges'&&(fBadges.length===0?<div className="empty">Aucun badge</div>:
+      <table><thead><tr><th>Nom</th><th>Description</th><th style={{width:100}}>Actions</th></tr></thead>
+      <tbody>{fBadges.map(b=><tr key={b.id}>
+        <td><span className="badge">{b.nom||'—'}</span></td>
+        <td>{b.description||''}</td>
+        <td>
+          <button className="btn-icon" onClick={()=>setModal({type:'badge',data:b})} title="Modifier">✏️</button>
+          <button className="btn-icon" onClick={()=>delBadge(b.id)} title="Supprimer">🗑️</button>
+        </td>
+      </tr>)}</tbody></table>)}
+
+    {tab==='attribs'&&(fAttribs.length===0?<div className="empty">Aucune attribution</div>:
+      <table><thead><tr><th>Badge</th><th>Utilisateur</th><th>Date</th><th style={{width:100}}>Actions</th></tr></thead>
+      <tbody>{fAttribs.map(a=><tr key={a.id}>
+        <td><span className="badge">{badgeLabel(a.badge_id)}</span></td>
+        <td>{userLabel(a.utilisateur_id)}</td>
+        <td>{a.date_attribution?(typeof a.date_attribution==='number'?new Date(a.date_attribution*1000).toLocaleDateString():a.date_attribution):''}</td>
+        <td>
+          <button className="btn-icon" onClick={()=>setModal({type:'attrib',data:a})}>✏️</button>
+          <button className="btn-icon" onClick={()=>delAttrib(a.id)}>🗑️</button>
+        </td>
+      </tr>)}</tbody></table>)}
+
+    {modal&&modal.type==='badge'&&<BadgeModal data={modal.data} onClose={()=>setModal(null)} onSave={saveBadge}/>}
+    {modal&&modal.type==='attrib'&&<AttribModal data={modal.data} badges={badges} users={users} onClose={()=>setModal(null)} onSave={saveAttrib}/>}
+    {toast&&<div className={'toast '+toast.type}>{toast.msg}</div>}
+  </div>);
+}
+
+function BadgeModal({data,onClose,onSave}){
+  const [f,setF]=useState({id:data.id,nom:data.nom||'',description:data.description||''});
+  const submit=()=>{if(!f.nom.trim())return;onSave(f)};
+  return (<div className="modal"><div className="modal-box">
+    <h2>{f.id?'Modifier':'Nouveau'} badge</h2>
+    <div className="field"><label>Nom *</label><input value={f.nom} onChange={e=>setF({...f,nom:e.target.value})} autoFocus/></div>
+    <div className="field"><label>Description</label><textarea rows="3" value={f.description} onChange={e=>setF({...f,description:e.target.value})}/></div><div class="actions">
+      <button className="btn-s" onClick={onClose}>Annuler</button>
+      <button className="btn-p" onClick={submit}>Enregistrer</button>
+    </div>
+  </div></div>);
+}
+
+function AttribModal({data,badges,users,onClose,onSave}){
+  const [f,setF]=useState({id:data.id,badge_id:data.badge_id||'',utilisateur_id:data.utilisateur_id||'',date_attribution:data.date_attribution||''});
+  const submit=()=>{if(!f.badge_id||!f.utilisateur_id)return;onSave(f)};
+  return (<div className="modal"><div className="modal-box">
+    <h2>{f.id?'Modifier':'Nouvelle'} attribution</h2>
+    <div className="field"><label>Badge *</label>
+      <select value={f.badge_id} onChange={e=>setF({...f,badge_id:e.target.value})}>
+        <option value="">— Sélectionner —</option>
+        {badges.map(b=><option key={b.id} value={b.id}>{b.nom||'#'+b.id}</option>)}
+      </select>
+    </div>
+    <div className="field"><label>Utilisateur *</label>
+      <select value={f.utilisateur_id} onChange={e=>setF({...f,utilisateur_id:e.target.value})}>
+        <option value="">— Sélectionner —</option>
+        {users.map(u=><option key={u.id} value={u.id}>{u.nom||u.name||u.email||'#'+u.id}</option>)}
+      </select>
+    </div>
+    <div className="field"><label>Date d'attribution</label>
+      <input type="date" value={typeof f.date_attribution==='number'?new Date(f.date_attribution*1000).toISOString().slice(0,10):(f.date_attribution||'')} onChange={e=>setF({...f,date_attribution:e.target.value})}/>
+    </div>
+    <div className="actions">
+      <button className="btn-s" onClick={onClose}>Annuler</button>
+      <button className="btn-p" onClick={submit}>Enregistrer</button>
+    </div>
+  </div></div>);
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
