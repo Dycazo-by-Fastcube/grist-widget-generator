@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Gestion des clés</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f7fa;color:#222;font-size:14px}
+.app{padding:16px;max-width:1400px;margin:0 auto}
+.tabs{display:flex;gap:4px;border-bottom:2px solid #e1e5eb;margin-bottom:16px}
+.tab{padding:10px 18px;cursor:pointer;border:none;background:none;font-size:14px;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px}
+.tab.active{color:#1a73e8;border-bottom-color:#1a73e8;font-weight:600}
+.toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+input,select,button{padding:8px 12px;border:1px solid #d0d7de;border-radius:6px;font-size:13px;background:#fff}
+input:focus,select:focus{outline:none;border-color:#1a73e8}
+button{cursor:pointer;background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:500}
+button:hover{background:#1557b0}
+button.sec{background:#fff;color:#444}
+button.sec:hover{background:#f0f0f0}
+button.danger{background:#d93025;border-color:#d93025}
+button.danger:hover{background:#a50e0e}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid #eee}
+th{background:#f8f9fa;font-weight:600;font-size:12px;text-transform:uppercase;color:#555}
+tr:hover{background:#fafbfc}
+.search{flex:1;min-width:180px}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.b-ok{background:#e6f4ea;color:#137333}
+.b-out{background:#fce8e6;color:#c5221f}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal{background:#fff;border-radius:10px;padding:20px;width:90%;max-width:500px;max-height:90vh;overflow-y:auto}
+.modal h3{margin-bottom:14px}
+.fg{margin-bottom:12px}
+.fg label{display:block;font-size:12px;color:#555;margin-bottom:4px;font-weight:500}
+.fg input,.fg select{width:100%}
+.row-actions{display:flex;gap:6px}
+.row-actions button{padding:4px 10px;font-size:12px}
+.toast{position:fixed;bottom:20px;right:20px;padding:12px 18px;border-radius:8px;color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:200}
+.toast.ok{background:#137333}.toast.err{background:#c5221f}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px}
+.card{background:#fff;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.card .lbl{font-size:12px;color:#666;text-transform:uppercase}
+.card .val{font-size:26px;font-weight:700;color:#1a73e8;margin-top:4px}
+.dash-section{background:#fff;padding:16px;border-radius:8px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.dash-section h3{margin-bottom:10px;font-size:15px;color:#333}
+.empty{text-align:center;padding:40px;color:#888}
+.bar{height:20px;background:#e8eaed;border-radius:10px;overflow:hidden;margin:4px 0}
+.bar-fill{height:100%;background:#1a73e8}
+.bar-row{display:grid;grid-template-columns:140px 1fr 50px;gap:8px;align-items:center;margin-bottom:6px;font-size:13px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef}=React;
+const toRows=(t)=>{const ids=t.id||[];return ids.map((id,i)=>{const r={id};Object.keys(t).forEach(k=>{if(k!=='id')r[k]=t[k][i]});return r})};
+
+function App(){
+  const [tab,setTab]=useState('liste');
+  const [cles,setCles]=useState([]);
+  const [cats,setCats]=useState([]);
+  const [locs,setLocs]=useState([]);
+  const [porteurs,setPorteurs]=useState([]);
+  const [histo,setHisto]=useState([]);
+  const [search,setSearch]=useState('');
+  const [fCat,setFCat]=useState('');
+  const [fLoc,setFLoc]=useState('');
+  const [modal,setModal]=useState(null);
+  const [toast,setToast]=useState(null);
+  const tRef=useRef();
+
+  const notify=(type,msg)=>{setToast({type,msg});if(tRef.current)clearTimeout(tRef.current);tRef.current=setTimeout(()=>setToast(null),2800)};
+
+  const load=async()=>{
+    try{
+      const tables=await grist.docApi.listTables();
+      const pick=(n)=>tables.find(t=>t.toLowerCase()===n.toLowerCase())||n;
+      setCles(toRows(await grist.docApi.fetchTable(pick('Cle'))));
+      setCats(toRows(await grist.docApi.fetchTable(pick('Categorie'))));
+      setLocs(toRows(await grist.docApi.fetchTable(pick('Localisation'))));
+      setPorteurs(toRows(await grist.docApi.fetchTable(pick('Porteur'))));
+      setHisto(toRows(await grist.docApi.fetchTable(pick('Historique'))));
+    }catch(e){notify('err','Erreur chargement: '+e.message)}
+  };
+
+  useEffect(()=>{
+    grist.ready({requiredAccess:'full'});
+    grist.onRecords(()=>load());
+    load();
+  },[]);
+
+  const findTable=async(n)=>{const tables=await grist.docApi.listTables();return tables.find(t=>t.toLowerCase()===n.toLowerCase())||n};
+
+  const save=async(data)=>{
+    try{
+      const tbl=await findTable('Cle');
+      const payload={};
+      ['nom','code','categorie','localisation','porteur','statut','notes'].forEach(k=>{
+        if(data[k]!==undefined&&data[k]!=='')payload[k]=data[k];
+      });
+      if(data.id){
+        await grist.docApi.applyUserActions([['UpdateRecord',tbl,data.id,payload]]);
+        notify('ok','Clé mise à jour');
+      }else{
+        await grist.docApi.applyUserActions([['AddRecord',tbl,null,payload]]);
+        notify('ok','Clé créée');
+      }
+      setModal(null);
+      await load();
+    }catch(e){notify('err','Erreur: '+e.message)}
+  };
+
+  const remove=async(id)=>{
+    if(!confirm('Supprimer cette clé ?'))return;
+    try{
+      const tbl=await findTable('Cle');
+      await grist.docApi.applyUserActions([['RemoveRecord',tbl,id]]);
+      notify('ok','Supprimée');
+      await load();
+    }catch(e){notify('err','Erreur: '+e.message)}
+  };
+
+  const getLabel=(row,refCol,refList,labelKeys=['nom','libelle','name','titre','code'])=>{
+    const dispKeys=Object.keys(row).filter(k=>k.startsWith('gristHelper_Display'));
+    for(const k of dispKeys){if(row[k])return row[k]}
+    const id=row[refCol];
+    if(!id)return '';
+    const found=refList.find(r=>r.id===id);
+    if(!found)return '#'+id;
+    for(const lk of labelKeys){if(found[lk])return found[lk]}
+    return '#'+id;
+  };
+
+  const cleLabel=(c,col,list)=>{
+    const id=c[col];if(!id)return '—';
+    const f=list.find(r=>r.id===id);if(!f)return '#'+id;
+    return f.nom||f.libelle||f.name||f.titre||f.code||('#'+id);
+  };
+
+  const filtered=cles.filter(c=>{
+    const s=search.toLowerCase();
+    const match=!s||(c.nom||'').toLowerCase().includes(s)||(c.code||'').toLowerCase().includes(s);
+    const mc=!fCat||String(c.categorie)===fCat;
+    const ml=!fLoc||String(c.localisation)===fLoc;
+    return match&&mc&&ml;
+  });
+
+  const stats={
+    total:cles.length,
+    cats:cats.length,
+    locs:locs.length,
+    sorties:cles.filter(c=>c.porteur&&c.porteur!==0).length,
+  };
+
+  const byCat=cats.map(cat=>({
+    nom:cat.nom||cat.libelle||cat.name||('#'+cat.id),
+    count:cles.filter(c=>c.categorie===cat.id).length
+  })).sort((a,b)=>b.count-a.count);
+
+  const maxCat=Math.max(1,...byCat.map(b=>b.count));
+
+  return (
+    <div className="app">
+      <div className="tabs">
+        <button className={'tab'+(tab==='liste'?' active':'')} onClick={()=>setTab('liste')}>📋 Liste des clés</button>
+        <button className={'tab'+(tab==='dash'?' active':'')} onClick={()=>setTab('dash')}>📊 Dashboard</button>
+      </div>
+
+      {tab==='liste'&&(
+        <>
+          <div className="toolbar">
+            <input className="search" placeholder="Rechercher nom ou code..." value={search} onChange={e=>setSearch(e.target.value)}/>
+            <select value={fCat} onChange={e=>setFCat(e.target.value)}>
+              <option value="">Toutes catégories</option>
+              {cats.map(c=><option key={c.id} value={c.id}>{c.nom||c.libelle||c.name||'#'+c.id}</option>)}
+            </select>
+            <select value={fLoc} onChange={e=>setFLoc(e.target.value)}>
+              <option value="">Toutes localisations</option>
+              {locs.map(l=><option key={l.id} value={l.id}>{l.nom||l.libelle||l.name||'#'+l.id}</option>)}
+            </select>
+            <button onClick={()=>setModal({})}>+ Nouvelle clé</button>
+            <button className="sec" onClick={load}>↻</button>
+          </div>
+          {filtered.length===0?(
+            <div className="empty">Aucune clé.</div>
+          ):(
+          <table>
+            <thead>
+              <tr><th>Nom</th><th>Code</th><th>Catégorie</th><th>Localisation</th><th>Porteur</th><th>Statut</th><th></th></tr>
+            </thead>
+            <tbody>
+              {filtered.map(c=>{
+                const aPorteur=c.porteur&&c.porteur!==0;
+                return (
+                  <tr key={c.id}>
+                    <td><strong>{c.nom||'—'}</strong></td>
+                    <td>{c.code||'—'}</td>
+                    <td>{cleLabel(c,'categorie',cats)}</td>
+                    <td>{cleLabel(c,'localisation',locs)}</td>
+                    <td>{cleLabel(c,'porteur',porteurs)}</td>
+                    <td><span className={'badge '+(aPorteur?'b-out':'b-ok')}>{aPorteur?'Sortie':'Disponible'}</span></td>
+                    <td>
+                      <div className="row-actions">
+                        <button className="sec" onClick={()=>setModal(c)}>✎</button>
+                        <button className="danger" onClick={()=>remove(c.id)}>✕</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          )}
+        </>
+      )}
+
+      {tab==='dash'&&(
+        <>
+          <div className="grid">
+            <div className="card"><div className="lbl">Clés totales</div><div className="val">{stats.total}</div></div>
+            <div className="card"><div className="lbl">Sorties</div><div className="val">{stats.sorties}</div></div>
+            <div className="card"><div className="lbl">Disponibles</div><div className="val">{stats.total-stats.sorties}</div></div>
+            <div className="card"><div className="lbl">Catégories</div><div className="val">{stats.cats}</div></div>
+            <div className="card"><div className="lbl">Localisations</div><div className="val">{stats.locs}</div></div>
+            <div className="card"><div className="lbl">Porteurs</div><div className="val">{porteurs.length}</div></div>
+          </div>
+          <div className="dash-section">
+            <h3>Répartition par catégorie</h3>
+            {byCat.length===0?<div className="empty">Aucune catégorie</div>:byCat.map((b,i)=>(
+              <div key={i} className="bar-row">
+                <div>{b.nom}</div>
+                <div className="bar"><div className="bar-fill" style={{width:(b.count/maxCat*100)+'%'}}></div></div>
+                <div style={{textAlign:'right',fontWeight:600}}>{b.count}</div>
+              </div>
+            ))}
+          </div>
+          <div className="dash-section">
+            <h3>Historique récent</h3>
+            {histo.length===0?<div className="empty">Aucun historique</div>:(
+              <table>
+                <thead><tr><th>Date</th><th>Clé</th><th>Porteur</th><th>Action</th></tr></thead>
+                <tbody>
+                  {histo.slice(-10).reverse().map(h=>(
+                    <tr key={h.id}>
+                      <td>{h.date?new Date(h.date*1000).toLocaleDateString('fr-FR'):'—'}</td>
+                      <td>{cleLabel(h,'cle',cles)}</td>
+                      <td>{cleLabel(h,'porteur',porteurs)}</td>
+                      <td>{h.action||h.type||'—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
+
+      {modal&&(
+        <EditModal data={modal} cats={cats} locs={locs} porteurs={porteurs} onClose={()=>setModal(null)} onSave={save}/>
+      )}
+
+      {toast&&<div className={'toast '+toast.type}>{toast.msg}</div>}
+    </div>
+  );
+}
+
+function EditModal({data,cats,locs,porteurs,onClose,onSave}){
+  const [f,setF]=useState({
+    id:data.id,
+    nom:data.nom||'',
+    code:data.code||'',
+    categorie:data.categorie||'',
+    localisation:data.localisation||'',
+    porteur:data.porteur||'',
+    statut:data.statut||'',
+    notes:data.notes||'',
+  });
+  const upd=(k,v)=>setF(s=>({...s,[k]:v}));
+  const submit=()=>{
+    if(!f.nom.trim()){alert('Nom obligatoire');return}
+    const out={...f};
+    ['categorie','localisation','porteur'].forEach(k=>{out[k]=out[k]?Number(out[k]):0});
+    onSave(out);
+  };
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
+        <h3>{data.id?'Modifier la clé':'Nouvelle clé'}</h3>
+        <div className="fg"><label>Nom *</label><input value={f.nom} onChange={e=>upd('nom',e.target.value)}/></div>
+        <div className="fg"><label>Code</label><input value={f.code} onChange={e=>upd('code',e.target.value)}/></div>
+        <div className="fg"><label>Catégorie</label>
+          <select value={f.categorie} onChange={e=>upd('categorie',e.target.value)}>
+            <option value="">—</option>
+            {cats.map(c=><option key={c.id} value={c.id}>{c.nom||c.libelle||c.name||'#'+c.id}</option>)}
+          </select>
+        </div>
+        <div className="fg"><label>Localisation</label>
+          <select value={f.localisation} onChange={e=>upd('localisation',e.target.value)}>
+            <option value="">—</option>
+            {locs.map(l=><option key={l.id} value={l.id}>{l.nom||l.libelle||l.name||'#'+l.id}</option>)}
+          </select>
+        </div>
+        <div className="fg"><label>Porteur</label>
+          <select value={f.porteur} onChange={e=>upd('porteur',e.target.value)}>
+            <option value="">—</option>
+            {porteurs.map(p=><option key={p.id} value={p.id}>{p.nom||p.libelle||p.name||'#'+p.id}</option>)}
+          </select>
+        </div>
+        <div className="fg"><label>Statut</label><input value={f.statut} onChange={e=>upd('statut',e.target.value)}/></div>
+        <div className="fg"><label>Notes</label><input value={f.notes} onChange={e=>upd('notes',e.target.value)}/></div>
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:16}}>
+          <button className="sec" onClick={onClose}>Annuler</button>
+          <button onClick={submit}>Enregistrer</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
