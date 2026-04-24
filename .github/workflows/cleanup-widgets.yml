@@ -19,7 +19,7 @@ jobs:
       - name: Identifier et fermer les issues anciennes
         uses: actions/github-script@v7
         env:
-          RETENTION_DAYS: '30'
+          RETENTION_DAYS: '1'
         with:
           script: |
             const fs = require('fs');
