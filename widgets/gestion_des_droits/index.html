@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Gestion des droits</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#f5f7fa;color:#222;padding:12px}
+h1{font-size:18px;margin-bottom:10px;color:#1a365d}
+.tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid #e2e8f0;flex-wrap:wrap}
+.tab{padding:8px 14px;cursor:pointer;background:none;border:none;font-size:13px;color:#555;border-bottom:2px solid transparent;margin-bottom:-2px}
+.tab.active{color:#2b6cb0;border-bottom-color:#2b6cb0;font-weight:600}
+.bar{display:flex;gap:8px;margin-bottom:10px;align-items:center}
+input,select,textarea{padding:6px 8px;border:1px solid #cbd5e0;border-radius:4px;font-size:13px;font-family:inherit}
+input[type=search]{flex:1}
+button{padding:6px 12px;background:#2b6cb0;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px}
+button:hover{background:#2c5282}
+button.sec{background:#718096}
+button.danger{background:#c53030}
+button:disabled{background:#a0aec0;cursor:not-allowed}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #edf2f7;font-size:13px}
+th{background:#edf2f7;font-weight:600;color:#2d3748}
+tr:hover td{background:#f7fafc}
+.actions{display:flex;gap:4px}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:#bee3f8;color:#2c5282}
+.badge.admin{background:#fed7d7;color:#c53030}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal-box{background:#fff;padding:18px;border-radius:8px;width:420px;max-width:92vw;max-height:90vh;overflow:auto}
+.modal-box h2{font-size:15px;margin-bottom:12px}
+.field{margin-bottom:10px}
+.field label{display:block;font-size:12px;margin-bottom:3px;color:#4a5568}
+.field input,.field select,.field textarea{width:100%}
+.modal-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}
+.toast{position:fixed;bottom:16px;right:16px;padding:10px 14px;border-radius:4px;color:#fff;font-size:13px;z-index:200}
+.toast.ok{background:#38a169}.toast.err{background:#c53030}
+.empty{text-align:center;padding:30px;color:#718096;font-size:13px}
+.role-info{padding:6px 10px;background:#e6fffa;border-left:3px solid #38b2ac;font-size:12px;margin-bottom:10px;border-radius:3px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef}=React;
+const toRows=(t)=>{const ids=t.id||[];return ids.map((id,i)=>{const r={id};Object.keys(t).forEach(k=>{if(k!=='id')r[k]=t[k][i]});return r})};
+const TABLES=['Utilisateur','Role','Droit','Conge','Formation','Evaluation'];
+const SCHEMA={
+ Utilisateur:[{k:'nom',l:'Nom'},{k:'email',l:'Email'},{k:'role',l:'Rôle'}],
+ Role:[{k:'nom',l:'Nom'},{k:'description',l:'Description'}],
+ Droit:[{k:'nom',l:'Nom'},{k:'role',l:'Rôle'},{k:'description',l:'Description'}],
+ Conge:[{k:'utilisateur',l:'Utilisateur'},{k:'date_debut',l:'Début'},{k:'date_fin',l:'Fin'},{k:'type',l:'Type'},{k:'statut',l:'Statut'}],
+ Formation:[{k:'titre',l:'Titre'},{k:'utilisateur',l:'Utilisateur'},{k:'date',l:'Date'},{k:'statut',l:'Statut'}],
+ Evaluation:[{k:'utilisateur',l:'Utilisateur'},{k:'date',l:'Date'},{k:'note',l:'Note'},{k:'commentaire',l:'Commentaire'}]
+};
+
+function App(){
+ const [role,setRole]=useState('collaborateurs');
+ const [email,setEmail]=useState('');
+ const [tab,setTab]=useState('Utilisateur');
+ const [data,setData]=useState({});
+ const [loading,setLoading]=useState(true);
+ const [search,setSearch]=useState('');
+ const [edit,setEdit]=useState(null);
+ const [toast,setToast]=useState(null);
+ const tref=useRef(null);
+
+ const notify=(type,msg)=>{setToast({type,msg});if(tref.current)clearTimeout(tref.current);tref.current=setTimeout(()=>setToast(null),2800)};
+
+ const loadAll=async()=>{
+  setLoading(true);
+  const d={};
+  for(const t of TABLES){
+   try{d[t]=toRows(await grist.docApi.fetchTable(t))}catch(e){d[t]=[]}
+  }
+  setData(d);setLoading(false);
+ };
+
+ useEffect(()=>{
+  grist.ready({requiredAccess:'full'});
+  grist.onRecords(async(records)=>{
+   if(records&&records[0]){
+    const r=records[0];
+    setEmail(r.email||'');
+    if(r.role){const rn=String(r.role).toLowerCase();setRole(rn.includes('admin')?'Admin':'collaborateurs')}
+   }
+   await loadAll();
+  });
+ },[]);
+
+ const isAdmin=role==='Admin';
+ const canWrite=isAdmin;
+
+ const save=async(table,rec)=>{
+  try{
+   const payload={...rec};delete payload.id;
+   Object.keys(payload).forEach(k=>{if(payload[k]===''||payload[k]===undefined)delete payload[k]});
+   if(rec.id){
+    await grist.docApi.applyUserActions([['UpdateRecord',table,rec.id,payload]]);
+    notify('ok','Mis à jour');
+   }else{
+    await grist.docApi.applyUserActions([['AddRecord',table,null,payload]]);
+    notify('ok','Créé');
+   }
+   setEdit(null);await loadAll();
+  }catch(e){notify('err','Erreur : '+e.message)}
+ };
+
+ const del=async(table,id)=>{
+  if(!confirm('Supprimer cet enregistrement ?'))return;
+  try{
+   await grist.docApi.applyUserActions([['RemoveRecord',table,id]]);
+   notify('ok','Supprimé');await loadAll();
+  }catch(e){notify('err','Erreur : '+e.message)}
+ };
+
+ const rows=(data[tab]||[]).filter(r=>{
+  if(!search)return true;
+  const s=search.toLowerCase();
+  return Object.values(r).some(v=>v&&String(v).toLowerCase().includes(s));
+ });
+
+ const cols=SCHEMA[tab]||[];
+
+ if(loading)return <div className="empty">Chargement…</div>;
+
+ return (
+  <div>
+   <h1>Gestion des droits {isAdmin?<span className="badge admin">Admin</span>:<span className="badge">Collaborateur</span>}</h1>
+   <div className="role-info">
+    {isAdmin?'Mode administration — accès complet en lecture/écriture.':'Mode consultation — vous pouvez consulter vos données.'}
+    {email&&<span> Connecté : <b>{email}</b></span>}
+   </div>
+   <div className="tabs">
+    {TABLES.map(t=><button key={t} className={'tab'+(tab===t?' active':'')} onClick={()=>{setTab(t);setSearch('')}}>{t}</button>)}
+   </div>
+   <div className="bar">
+    <input type="search" placeholder="Rechercher…" value={search} onChange={e=>setSearch(e.target.value)}/>
+    {canWrite&&<button onClick={()=>setEdit({_new:true})}>+ Ajouter</button>}
+    <button className="sec" onClick={loadAll}>↻</button>
+   </div>
+   {rows.length===0?<div className="empty">Aucun enregistrement</div>:
+   <table>
+    <thead><tr><th>#</th>{cols.map(c=><th key={c.k}>{c.l}</th>)}{canWrite&&<th>Actions</th>}</tr></thead>
+    <tbody>
+     {rows.map(r=>(
+      <tr key={r.id}>
+       <td>{r.id}</td>
+       {cols.map(c=><td key={c.k}>{r[c.k]!==undefined&&r[c.k]!==null?String(r[c.k]):'—'}</td>)}
+       {canWrite&&<td><div className="actions">
+        <button onClick={()=>setEdit({...r})}>✎</button>
+        <button className="danger" onClick={()=>del(tab,r.id)}>✕</button>
+       </div></td>}
+      </tr>
+     ))}
+    </tbody>
+   </table>}
+   {edit&&<EditModal table={tab} cols={cols} rec={edit} onCancel={()=>setEdit(null)} onSave={save}/>}
+   {toast&&<div className={'toast '+toast.type}>{toast.msg}</div>}
+  </div>
+ );
+}
+
+function EditModal({table,cols,rec,onCancel,onSave}){
+ const [f,setF]=useState(()=>{const o={};cols.forEach(c=>{o[c.k]=rec[c.k]!==undefined&&rec[c.k]!==null?rec[c.k]:''});if(rec.id)o.id=rec.id;return o});
+ const submit=(e)=>{e.preventDefault();onSave(table,f)};
+ return (
+  <div className="modal" onClick={onCancel}>
+   <div className="modal-box" onClick={e=>e.stopPropagation()}>
+    <h2>{rec.id?'Modifier':'Créer'} — {table}</h2>
+    <form onSubmit={submit}>
+     {cols.map(c=>(
+      <div className="field" key={c.k}>
+       <label>{c.l}</label>
+       {c.k==='description'||c.k==='commentaire'?
+        <textarea rows="2" value={f[c.k]||''} onChange={e=>setF({...f,[c.k]:e.target.value})}/>:
+        <input type={c.k.includes('date')?'date':'text'} value={f[c.k]||''} onChange={e=>setF({...f,[c.k]:e.target.value})}/>}
+      </div>
+     ))}
+     <div className="modal-actions">
+      <button type="button" className="sec" onClick={onCancel}>Annuler</button>
+      <button type="submit">Enregistrer</button>
+     </div>
+    </form>
+   </div>
+  </div>
+ );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
