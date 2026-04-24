@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Gestion Matériel</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,sans-serif;margin:0;background:#f5f7fa;color:#222}
+.app{padding:16px;max-width:1200px;margin:0 auto}
+.tabs{display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid #e0e4ea}
+.tab{padding:10px 18px;cursor:pointer;background:none;border:none;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px}
+.tab.active{color:#2b6cb0;border-bottom-color:#2b6cb0}
+.card{background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:16px}
+h2{margin:0 0 12px;font-size:18px}
+h3{margin:0 0 8px;font-size:14px;color:#555;font-weight:500}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eee}
+th{background:#f8fafc;font-weight:600;color:#555}
+tr:hover td{background:#f8fafc}
+.btn{padding:6px 12px;border:1px solid #2b6cb0;background:#2b6cb0;color:#fff;border-radius:4px;cursor:pointer;font-size:13px}
+.btn:hover{background:#234e80}
+.btn.sec{background:#fff;color:#2b6cb0}
+.btn.danger{background:#c53030;border-color:#c53030}
+.btn.sm{padding:3px 8px;font-size:12px}
+input,select{padding:6px 8px;border:1px solid #cbd5e0;border-radius:4px;font-size:13px;width:100%}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:8px}
+.actions{display:flex;gap:6px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.stat{background:#fff;padding:16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.stat .v{font-size:28px;font-weight:700;color:#2b6cb0}
+.stat .l{font-size:12px;color:#666;text-transform:uppercase;letter-spacing:.5px}
+.toast{position:fixed;bottom:20px;right:20px;padding:12px 20px;border-radius:6px;color:#fff;font-size:13px;z-index:100}
+.toast.ok{background:#38a169}
+.toast.err{background:#c53030}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:#e2e8f0;color:#2d3748}
+.empty{text-align:center;padding:24px;color:#999;font-size:13px}
+.filter{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.filter input,.filter select{max-width:220px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef} = React;
+
+const toRows = (t)=>{const ids=t.id||[];return ids.map((id,i)=>{const r={id};Object.keys(t).forEach(k=>{if(k!=='id')r[k]=t[k][i]});return r})};
+
+function App(){
+  const [tab,setTab]=useState('dashboard');
+  const [materiel,setMateriel]=useState([]);
+  const [utilisateur,setUtilisateur]=useState([]);
+  const [affectation,setAffectation]=useState([]);
+  const [categorie,setCategorie]=useState([]);
+  const [me,setMe]=useState(null);
+  const [isAdmin,setIsAdmin]=useState(false);
+  const [toast,setToast]=useState(null);
+  const tRef=useRef();
+
+  const notify=(type,msg)=>{setToast({type,msg});clearTimeout(tRef.current);tRef.current=setTimeout(()=>setToast(null),3000)};
+
+  const load=async()=>{
+    try{
+      const [m,u,a,c]=await Promise.all([
+        grist.docApi.fetchTable('Materiel').catch(()=>({id:[]})),
+        grist.docApi.fetchTable('Utilisateur').catch(()=>({id:[]})),
+        grist.docApi.fetchTable('Affectation').catch(()=>({id:[]})),
+        grist.docApi.fetchTable('Categorie').catch(()=>({id:[]}))
+      ]);
+      setMateriel(toRows(m));
+      setUtilisateur(toRows(u));
+      setAffectation(toRows(a));
+      setCategorie(toRows(c));
+    }catch(e){notify('err','Erreur chargement: '+e.message)}
+  };
+
+  useEffect(()=>{
+    grist.ready({requiredAccess:'full'});
+    grist.onRecords(async(recs)=>{
+      if(recs&&recs[0]){
+        setMe(recs[0]);
+        setIsAdmin(!!(recs[0].admin||recs[0].is_admin||recs[0].role==='Admin'));
+      }
+      await load();
+    });
+    load();
+  },[]);
+
+  return(<div className="app">
+    <div className="tabs">
+      <button className={'tab'+(tab==='dashboard'?' active':'')} onClick={()=>setTab('dashboard')}>Dashboard</button>
+      <button className={'tab'+(tab==='materiel'?' active':'')} onClick={()=>setTab('materiel')}>Matériel</button>
+      <button className={'tab'+(tab==='affectations'?' active':'')} onClick={()=>setTab('affectations')}>Affectations</button>
+    </div>
+    {tab==='dashboard'&&<Dashboard materiel={materiel} affectation={affectation} utilisateur={utilisateur} categorie={categorie} me={me} isAdmin={isAdmin}/>}
+    {tab==='materiel'&&<MaterielList materiel={materiel} categorie={categorie} isAdmin={isAdmin} reload={load} notify={notify}/>}
+    {tab==='affectations'&&<AffectationList affectation={affectation} materiel={materiel} utilisateur={utilisateur} isAdmin={isAdmin} reload={load} notify={notify}/>}
+    {toast&&<div className={'toast '+toast.type}>{toast.msg}</div>}
+  </div>);
+}
+
+function Dashboard({materiel,affectation,utilisateur,categorie,me,isAdmin}){
+  const actifs=affectation.filter(a=>!a.date_retour&&!a.retour);
+  const dispo=materiel.length-actifs.length;
+  const mesAff=me?affectation.filter(a=>{
+    const uid=a.utilisateur||a.utilisateur_id||a.user_id;
+    return uid===me.id||a.gristHelper_Display===me.nom||a.email===me.email;
+  }):[];
+  return(<div>
+    <h2>Tableau de bord</h2>
+    <div className="stats">
+      <div className="stat"><div className="v">{materiel.length}</div><div className="l">Matériels</div></div>
+      <div className="stat"><div className="v">{actifs.length}</div><div className="l">Affectés</div></div>
+      <div className="stat"><div className="v">{dispo}</div><div className="l">Disponibles</div></div>
+      <div className="stat"><div className="v">{categorie.length}</div><div className="l">Catégories</div></div>
+      {isAdmin&&<div className="stat"><div className="v">{utilisateur.length}</div><div className="l">Utilisateurs</div></div>}
+    </div>
+    {!isAdmin&&<div className="card" style={{marginTop:16}}>
+      <h2>Mon matériel</h2>
+      {mesAff.length===0?<div className="empty">Aucun matériel affecté</div>:
+        <table><thead><tr><th>Matériel</th><th>Date affectation</th></tr></thead><tbody>
+          {mesAff.map(a=><tr key={a.id}><td>{a.gristHelper_Display2||a.materiel||'#'+a.id}</td><td>{a.date_affectation||'-'}</td></tr>)}
+        </tbody></table>}
+    </div>}
+    <div className="card" style={{marginTop:16}}>
+      <h2>Répartition par catégorie</h2>
+      {categorie.length===0?<div className="empty">Aucune catégorie</div>:
+        <table><thead><tr><th>Catégorie</th><th>Nombre</th></tr></thead><tbody>
+          {categorie.map(c=>{
+            const n=materiel.filter(m=>(m.categorie||m.categorie_id)===c.id).length;
+            return<tr key={c.id}><td>{c.nom||c.libelle||'#'+c.id}</td><td><span className="badge">{n}</span></td></tr>;
+          })}
+        </tbody></table>}
+    </div>
+  </div>);
+}
+
+function MaterielList({materiel,categorie,isAdmin,reload,notify}){
+  const [edit,setEdit]=useState(null);
+  const [form,setForm]=useState({});
+  const [q,setQ]=useState('');
+  const [fc,setFc]=useState('');
+
+  const startNew=()=>{setEdit('new');setForm({nom:'',reference:'',categorie:null})};
+  const startEdit=(m)=>{setEdit(m.id);setForm({nom:m.nom||'',reference:m.reference||'',categorie:m.categorie||m.categorie_id||null})};
+  const cancel=()=>{setEdit(null);setForm({})};
+
+  const save=async()=>{
+    try{
+      const data={nom:form.nom,reference:form.reference,categorie:form.categorie?Number(form.categorie):null};
+      if(edit==='new'){
+        await grist.docApi.applyUserActions([['AddRecord','Materiel',null,data]]);
+        notify('ok','Matériel créé');
+      }else{
+        await grist.docApi.applyUserActions([['UpdateRecord','Materiel',edit,data]]);
+        notify('ok','Matériel modifié');
+      }
+      cancel();await reload();
+    }catch(e){notify('err',e.message)}
+  };
+
+  const del=async(id)=>{
+    if(!confirm('Supprimer ce matériel ?'))return;
+    try{
+      await grist.docApi.applyUserActions([['RemoveRecord','Materiel',id]]);
+      notify('ok','Supprimé');await reload();
+    }catch(e){notify('err',e.message)}
+  };
+
+  const catName=(id)=>{const c=categorie.find(x=>x.id===id);return c?(c.nom||c.libelle||'#'+id):'-'};
+
+  const filtered=materiel.filter(m=>{
+    if(q&&!((m.nom||'')+' '+(m.reference||'')).toLowerCase().includes(q.toLowerCase()))return false;
+    if(fc&&String(m.categorie||m.categorie_id)!==fc)return false;
+    return true;
+  });
+
+  return(<div className="card">
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+      <h2>Liste du matériel</h2>
+      {isAdmin&&<button className="btn" onClick={startNew}>+ Nouveau</button>}
+    </div>
+    <div className="filter">
+      <input placeholder="Rechercher..." value={q} onChange={e=>setQ(e.target.value)}/>
+      <select value={fc} onChange={e=>setFc(e.target.value)}>
+        <option value="">Toutes catégories</option>
+        {categorie.map(c=><option key={c.id} value={c.id}>{c.nom||c.libelle||'#'+c.id}</option>)}
+      </select>
+    </div>
+    {edit&&isAdmin&&<div style={{background:'#f0f4f8',padding:12,borderRadius:6,marginBottom:12}}>
+      <h3>{edit==='new'?'Nouveau matériel':'Modifier'}</h3>
+      <div className="row">
+        <input placeholder="Nom" value={form.nom||''} onChange={e=>setForm({...form,nom:e.target.value})}/>
+        <input placeholder="Référence" value={form.reference||''} onChange={e=>setForm({...form,reference:e.target.value})}/>
+        <select value={form.categorie||''} onChange={e=>setForm({...form,categorie:e.target.value})}>
+          <option value="">-- Catégorie --</option>
+          {categorie.map(c=><option key={c.id} value={c.id}>{c.nom||c.libelle||'#'+c.id}</option>)}
+        </select>
+      </div>
+      <div className="actions">
+        <button className="btn" onClick={save}>Enregistrer</button>
+        <button className="btn sec" onClick={cancel}>Annuler</button>
+      </div>
+    </div>}
+    {filtered.length===0?<div className="empty">Aucun matériel</div>:
+      <table><thead><tr><th>Nom</th><th>Référence</th><th>Catégorie</th>{isAdmin&&<th></th>}</tr></thead><tbody>
+        {filtered.map(m=><tr key={m.id}>
+          <td>{m.nom||'-'}</td>
+          <td>{m.reference||'-'}</td>
+          <td><span className="badge">{catName(m.categorie||m.categorie_id)}</span></td>
+          {isAdmin&&<td><div className="actions">
+            <button className="btn sec sm" onClick={()=>startEdit(m)}>Modifier</button>
+            <button className="btn danger sm" onClick={()=>del(m.id)}>Suppr</button>
+          </div></td>}
+        </tr>)}
+      </tbody></table>}
+  </div>);
+}
+
+function AffectationList({affectation,materiel,utilisateur,isAdmin,reload,notify}){
+  const [edit,setEdit]=useState(null);
+  const [form,setForm]=useState({});
+
+  const startNew=()=>{setEdit('new');setForm({materiel:null,utilisateur:null,date_affectation:new Date().toISOString().slice(0,10)})};
+  const startEdit=(a)=>{setEdit(a.id);setForm({materiel:a.materiel||a.materiel_id,utilisateur:a.utilisateur||a.utilisateur_id,date_affectation:a.date_affectation||'',date_retour:a.date_retour||''})};
+  const cancel=()=>{setEdit(null);setForm({})};
+
+  const save=async()=>{
+    try{
+      const data={
+        materiel:form.materiel?Number(form.materiel):null,
+        utilisateur:form.utilisateur?Number(form.utilisateur):null,
+        date_affectation:form.date_affectation||null,
+        date_retour:form.date_retour||null
+      };
+      if(edit==='new'){
+        await grist.docApi.applyUserActions([['AddRecord','Affectation',null,data]]);
+        notify('ok','Affectation créée');
+      }else{
+        await grist.docApi.applyUserActions([['UpdateRecord','Affectation',edit,data]]);
+        notify('ok','Modifiée');
+      }
+      cancel();await reload();
+    }catch(e){notify('err',e.message)}
+  };
+
+  const del=async(id)=>{
+    if(!confirm('Supprimer cette affectation ?'))return;
+    try{
+      await grist.docApi.applyUserActions([['RemoveRecord','Affectation',id]]);
+      notify('ok','Supprimée');await reload();
+    }catch(e){notify('err',e.message)}
+  };
+
+  const matName=(id)=>{const m=materiel.find(x=>x.id===id);return m?(m.nom||'#'+id):'#'+id};
+  const userName=(id)=>{const u=utilisateur.find(x=>x.id===id);return u?(u.nom||u.email||'#'+id):'#'+id};
+
+  return(<div className="card">
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+      <h2>Affectations</h2>
+      {isAdmin&&<button className="btn" onClick={startNew}>+ Nouvelle</button>}
+    </div>
+    {edit&&<div style={{background:'#f0f4f8',padding:12,borderRadius:6,marginBottom:12}}>
+      <h3>{edit==='new'?'Nouvelle affectation':'Modifier'}</h3>
+      <div className="row">
+        <select value={form.materiel||''} onChange={e=>setForm({...form,materiel:e.target.value})} disabled={!isAdmin}>
+          <option value="">-- Matériel --</option>
+          {materiel.map(m=><option key={m.id} value={m.id}>{m.nom||'#'+m.id}</option>)}
+        </select>
+        <select value={form.utilisateur||''} onChange={e=>setForm({...form,utilisateur:e.target.value})} disabled={!isAdmin}>
+          <option value="">-- Utilisateur --</option>
+          {utilisateur.map(u=><option key={u.id} value={u.id}>{u.nom||u.email||'#'+u.id}</option>)}
+        </select>
+        <input type="date" value={form.date_affectation||''} onChange={e=>setForm({...form,date_affectation:e.target.value})} disabled={!isAdmin}/>
+        <input type="date" placeholder="Retour" value={form.date_retour||''} onChange={e=>setForm({...form,date_retour:e.target.value})}/>
+      </div>
+      <div className="actions">
+        <button className="btn" onClick={save}>Enregistrer</button>
+        <button className="btn sec" onClick={cancel}>Annuler</button>
+      </div>
+    </div>}
+    {affectation.length===0?<div className="empty">Aucune affectation</div>:
+      <table><thead><tr><th>Matériel</th><th>Utilisateur</th><th>Affectation</th><th>Retour</th><th></th></tr></thead><tbody>
+        {affectation.map(a=><tr key={a.id}>
+          <td>{matName(a.materiel||a.materiel_id)}</td>
+          <td>{userName(a.utilisateur||a.utilisateur_id)}</td>
+          <td>{a.date_affectation||'-'}</td>
+          <td>{a.date_retour?a.date_retour:<span className="badge" style={{background:'#c6f6d5',color:'#22543d'}}>En cours</span>}</td>
+          <td><div className="actions">
+            {(isAdmin||!a.date_retour)&&<button className="btn sec sm" onClick={()=>startEdit(a)}>Modifier</button>}
+            {isAdmin&&<button className="btn danger sm" onClick={()=>del(a.id)}>Suppr</button>}
+          </div></td>
+        </tr>)}
+      </tbody></table>}
+  </div>);
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
