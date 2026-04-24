@@ -1,0 +1,93 @@
+name: Nettoyage widgets anciens
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # Chaque lundi à 3h
+  workflow_dispatch:      # Déclenchement manuel possible
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Identifier et fermer les issues anciennes
+        uses: actions/github-script@v7
+        env:
+          RETENTION_DAYS: '30'
+        with:
+          script: |
+            const fs = require('fs');
+            const retentionDays = parseInt(process.env.RETENTION_DAYS, 10);
+            const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'widget-generation',
+              state: 'open',
+              per_page: 100,
+            });
+
+            const slugs = [];
+            for (const issue of issues) {
+              if (new Date(issue.created_at) >= cutoff) continue;
+
+              const slug = issue.title
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, '_')
+                .substring(0, 40);
+              slugs.push(slug);
+
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `🗑️ Widget supprimé automatiquement après ${retentionDays} jours.`,
+              });
+
+              console.log(`Issue #${issue.number} fermée — slug : ${slug}`);
+            }
+
+            fs.writeFileSync('/tmp/slugs_to_delete.txt', slugs.join('\n'));
+            console.log(`Total : ${slugs.length} widget(s) à supprimer`);
+
+      - name: Supprimer les dossiers et commiter
+        run: |
+          if [ ! -s /tmp/slugs_to_delete.txt ]; then
+            echo "Aucun widget à supprimer."
+            exit 0
+          fi
+
+          DELETED=0
+          while IFS= read -r slug; do
+            [ -z "$slug" ] && continue
+            if [ -d "widgets/$slug" ]; then
+              rm -rf "widgets/$slug"
+              echo "✅ Supprimé : widgets/$slug"
+              DELETED=$((DELETED + 1))
+            else
+              echo "⚠️  Dossier absent (déjà supprimé ?) : widgets/$slug"
+            fi
+          done < /tmp/slugs_to_delete.txt
+
+          if [ "$DELETED" -gt 0 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A widgets/
+            git commit -m "cleanup: $DELETED widget(s) supprimé(s) (rétention ${{ env.RETENTION_DAYS || 30 }}j)"
+            git push
+            echo "✅ Commit poussé — $DELETED widget(s) nettoyé(s)"
+          fi
