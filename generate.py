@@ -135,7 +135,7 @@ Génère un fichier HTML complet et autonome qui :
 2. Affiche et permet de gérer les données des tables : {', '.join(spec.get('tables', []))}
 3. Respecte les rôles : {', '.join(spec.get('roles', []))}
 4. Respecte les permissions : {json.dumps(spec.get('permissions', {}), ensure_ascii=False)}
-5. Correspond aux écrans demandés : {spec.get('screens', '')}
+5. Inclut maximum 3 écrans/vues (onglets ou sections) dans l'interface — reste simple
 6. A un design propre avec CSS intégré
 
 CONTRAINTE CRITIQUE : ta réponse ne doit pas dépasser 3800 tokens.
