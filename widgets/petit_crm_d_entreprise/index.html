@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>CRM</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,Arial,sans-serif;background:#f5f6fa;color:#222;font-size:14px}
+.app{display:flex;flex-direction:column;height:100vh}
+nav{background:#1e293b;color:#fff;display:flex;padding:0 16px}
+nav button{background:none;border:0;color:#cbd5e1;padding:14px 20px;cursor:pointer;font-size:14px;border-bottom:3px solid transparent}
+nav button.active{color:#fff;border-color:#3b82f6}
+.role{margin-left:auto;align-self:center;font-size:12px;color:#94a3b8}
+main{flex:1;overflow:auto;padding:20px}
+h2{margin:0 0 16px}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid #eee}
+th{background:#f8fafc;font-weight:600;font-size:12px;text-transform:uppercase;color:#475569}
+tr:hover td{background:#f9fafb}
+button.btn{background:#3b82f6;color:#fff;border:0;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:13px}
+button.btn:hover{background:#2563eb}
+button.btn.del{background:#ef4444}
+button.btn.sec{background:#64748b}
+.toolbar{display:flex;gap:8px;margin-bottom:12px;align-items:center}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:50}
+.modal{background:#fff;border-radius:8px;padding:24px;min-width:400px;max-width:90vw}
+.modal h3{margin:0 0 16px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:#475569;margin-bottom:4px}
+.field input,.field select,.field textarea{width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:4px;font:inherit}
+.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.card{background:#fff;padding:20px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.card .v{font-size:28px;font-weight:700;color:#1e293b}
+.card .l{font-size:12px;color:#64748b;text-transform:uppercase;margin-top:4px}
+.toast{position:fixed;bottom:20px;right:20px;padding:12px 20px;border-radius:6px;color:#fff;z-index:100}
+.toast.ok{background:#10b981}.toast.err{background:#ef4444}
+.empty{text-align:center;padding:40px;color:#94a3b8}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:#e0e7ff;color:#3730a3}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef}=React;
+const toRows=(t)=>{const ids=t.id||[];return ids.map((id,i)=>{const r={id};Object.keys(t).forEach(k=>{if(k!=='id')r[k]=t[k][i]});return r})};
+
+const PERMS={
+  Utilisateur:{Admin:['create','read','update','delete'],Commerciaux:['read']},
+  Client:{Admin:['create','read','update','delete'],Commerciaux:['create','read','update']},
+  Opportunite:{Admin:['read','update','delete'],Commerciaux:['create','read']},
+  Activite:{Admin:['read','delete'],Commerciaux:['create','read','update']}
+};
+const can=(role,table,action)=>(PERMS[table]?.[role]||[]).includes(action);
+
+function App(){
+  const [tab,setTab]=useState('dashboard');
+  const [role,setRole]=useState('Commerciaux');
+  const [users,setUsers]=useState([]);
+  const [clients,setClients]=useState([]);
+  const [opps,setOpps]=useState([]);
+  const [acts,setActs]=useState([]);
+  const [modal,setModal]=useState(null);
+  const [toast,setToast]=useState(null);
+  const tt=useRef();
+
+  const showToast=(type,msg)=>{setToast({type,msg});clearTimeout(tt.current);tt.current=setTimeout(()=>setToast(null),3000)};
+
+  const load=async()=>{
+    try{
+      const tables=await grist.docApi.listTables();
+      const has=(n)=>tables.includes(n);
+      if(has('Utilisateur'))setUsers(toRows(await grist.docApi.fetchTable('Utilisateur')));
+      if(has('Client'))setClients(toRows(await grist.docApi.fetchTable('Client')));
+      if(has('Opportunite'))setOpps(toRows(await grist.docApi.fetchTable('Opportunite')));
+      if(has('Activite'))setActs(toRows(await grist.docApi.fetchTable('Activite')));
+    }catch(e){showToast('err','Erreur chargement: '+e.message)}
+  };
+
+  useEffect(()=>{
+    grist.ready({requiredAccess:'full'});
+    grist.onRecords(()=>load());
+    load();
+  },[]);
+
+  const save=async(table,id,data)=>{
+    try{
+      if(id)await grist.docApi.applyUserActions([['UpdateRecord',table,id,data]]);
+      else await grist.docApi.applyUserActions([['AddRecord',table,null,data]]);
+      await load();
+      setModal(null);
+      showToast('ok','Enregistré');
+    }catch(e){showToast('err',e.message)}
+  };
+  const del=async(table,id)=>{
+    if(!confirm('Supprimer ?'))return;
+    try{
+      await grist.docApi.applyUserActions([['RemoveRecord',table,id]]);
+      await load();
+      showToast('ok','Supprimé');
+    }catch(e){showToast('err',e.message)}
+  };
+
+  return(<div className="app">
+    <nav>
+      <button className={tab==='dashboard'?'active':''} onClick={()=>setTab('dashboard')}>Dashboard</button>
+      <button className={tab==='opps'?'active':''} onClick={()=>setTab('opps')}>Opportunités</button>
+      <button className={tab==='clients'?'active':''} onClick={()=>setTab('clients')}>Comptes</button>
+      <button className={tab==='acts'?'active':''} onClick={()=>setTab('acts')}>Activités</button>
+      {role==='Admin'&&<button className={tab==='users'?'active':''} onClick={()=>setTab('users')}>Utilisateurs</button>}
+      <span className="role">Rôle:&nbsp;
+        <select value={role} onChange={e=>setRole(e.target.value)} style={{background:'#334155',color:'#fff',border:0,padding:'4px'}}>
+          <option>Admin</option><option>Commerciaux</option>
+        </select>
+      </span>
+    </nav>
+    <main>
+      {tab==='dashboard'&&<Dashboard clients={clients} opps={opps} acts={acts}/>}
+      {tab==='opps'&&<OppsView role={role} opps={opps} clients={clients} onNew={()=>setModal({type:'opp'})} onEdit={(o)=>setModal({type:'opp',data:o})} onDel={(id)=>del('Opportunite',id)}/>}
+      {tab==='clients'&&<ClientsView role={role} clients={clients} onNew={()=>setModal({type:'client'})} onEdit={(c)=>setModal({type:'client',data:c})} onDel={(id)=>del('Client',id)}/>}
+      {tab==='acts'&&<ActsView role={role} acts={acts} opps={opps} onNew={()=>setModal({type:'act'})} onEdit={(a)=>setModal({type:'act',data:a})} onDel={(id)=>del('Activite',id)}/>}
+      {tab==='users'&&<UsersView role={role} users={users} onNew={()=>setModal({type:'user'})} onEdit={(u)=>setModal({type:'user',data:u})} onDel={(id)=>del('Utilisateur',id)}/>}
+    </main>
+    {modal&&<Modal modal={modal} clients={clients} opps={opps} onClose={()=>setModal(null)} onSave={save}/>}
+    {toast&&<div className={'toast '+toast.type}>{toast.msg}</div>}
+  </div>);
+}
+
+function Dashboard({clients,opps,acts}){
+  const totalCA=opps.reduce((s,o)=>s+(Number(o.montant)||0),0);
+  return(<div>
+    <h2>Dashboard</h2>
+    <div className="cards">
+      <div className="card"><div className="v">{clients.length}</div><div className="l">Comptes</div></div>
+      <div className="card"><div className="v">{opps.length}</div><div className="l">Opportunités</div></div>
+      <div className="card"><div className="v">{acts.length}</div><div className="l">Activités</div></div>
+      <div className="card"><div className="v">{totalCA.toLocaleString('fr-FR')} €</div><div className="l">Pipeline</div></div>
+    </div>
+    <h2>Opportunités récentes</h2>
+    <table><thead><tr><th>Nom</th><th>Statut</th><th>Montant</th></tr></thead>
+    <tbody>{opps.slice(0,5).map(o=><tr key={o.id}><td>{o.nom||o.titre||'#'+o.id}</td><td><span className="badge">{o.statut||'-'}</span></td><td>{o.montant||0} €</td></tr>)}</tbody></table>
+  </div>);
+}
+
+function OppsView({role,opps,clients,onNew,onEdit,onDel}){
+  return(<div>
+    <h2>Opportunités</h2>
+    <div className="toolbar">{can(role,'Opportunite','create')&&<button className="btn" onClick={onNew}>+ Nouvelle</button>}</div>
+    {opps.length===0?<div className="empty">Aucune opportunité</div>:
+    <table><thead><tr><th>Nom</th><th>Client</th><th>Statut</th><th>Montant</th><th></th></tr></thead>
+    <tbody>{opps.map(o=>{const c=clients.find(x=>x.id===o.client);return(
+      <tr key={o.id}><td>{o.nom||o.titre||'#'+o.id}</td><td>{c?.nom||o.gristHelper_Display||'-'}</td><td><span className="badge">{o.statut||'-'}</span></td><td>{o.montant||0} €</td>
+      <td>{can(role,'Opportunite','update')&&<button className="btn sec" onClick={()=>onEdit(o)}>Modifier</button>}{' '}{can(role,'Opportunite','delete')&&<button className="btn del" onClick={()=>onDel(o.id)}>×</button>}</td></tr>
+    )})}</tbody></table>}
+  </div>);
+}
+
+function ClientsView({role,clients,onNew,onEdit,onDel}){
+  return(<div>
+    <h2>Comptes</h2>
+    <div className="toolbar">{can(role,'Client','create')&&<button className="btn" onClick={onNew}>+ Nouveau</button>}</div>
+    {clients.length===0?<div className="empty">Aucun compte</div>:
+    <table><thead><tr><th>Nom</th><th>Email</th><th>Téléphone</th><th></th></tr></thead>
+    <tbody>{clients.map(c=>(
+      <tr key={c.id}><td>{c.nom||'#'+c.id}</td><td>{c.email||'-'}</td><td>{c.telephone||'-'}</td>
+      <td>{can(role,'Client','update')&&<button className="btn sec" onClick={()=>onEdit(c)}>Modifier</button>}{' '}{can(role,'Client','delete')&&<button className="btn del" onClick={()=>onDel(c.id)}>×</button>}</td></tr>
+    ))}</tbody></table>}
+  </div>);
+}
+
+function ActsView({role,acts,opps,onNew,onEdit,onDel}){
+  return(<div>
+    <h2>Activités</h2>
+    <div className="toolbar">{can(role,'Activite','create')&&<button className="btn" onClick={onNew}>+ Nouvelle</button>}</div>
+    {acts.length===0?<div className="empty">Aucune activité</div>:
+    <table><thead><tr><th>Type</th><th>Description</th><th>Date</th><th>Opportunité</th><th></th></tr></thead>
+    <tbody>{acts.map(a=>{const o=opps.find(x=>x.id===a.opportunite);return(
+      <tr key={a.id}><td><span className="badge">{a.type||'-'}</span></td><td>{a.description||'-'}</td><td>{a.date||'-'}</td><td>{o?.nom||a.gristHelper_Display||'-'}</td>
+      <td>{can(role,'Activite','update')&&<button className="btn sec" onClick={()=>onEdit(a)}>Modifier</button>}{' '}{can(role,'Activite','delete')&&<button className="btn del" onClick={()=>onDel(a.id)}>×</button>}</td></tr>
+    )})}</tbody></table>}
+  </div>);
+}
+
+function UsersView({role,users,onNew,onEdit,onDel}){
+  return(<div>
+    <h2>Utilisateurs</h2>
+    <div className="toolbar">{can(role,'Utilisateur','create')&&<button className="btn" onClick={onNew}>+ Nouveau</button>}</div>
+    {users.length===0?<div className="empty">Aucun utilisateur</div>:
+    <table><thead><tr><th>Nom</th><th>Email</th><th>Rôle</th><th></th></tr></thead>
+    <tbody>{users.map(u=>(
+      <tr key={u.id}><td>{u.nom||'#'+u.id}</td><td>{u.email||'-'}</td><td><span className="badge">{u.role||'-'}</span></td>
+      <td>{can(role,'Utilisateur','update')&&<button className="btn sec" onClick={()=>onEdit(u)}>Modifier</button>}{' '}{can(role,'Utilisateur','delete')&&<button className="btn del" onClick={()=>onDel(u.id)}>×</button>}</td></tr>
+    ))}</tbody></table>}
+  </div>);
+}
+
+function Modal({modal,clients,opps,onClose,onSave}){
+  const [form,setForm]=useState(modal.data||{});
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const submit=(e)=>{
+    e.preventDefault();
+    const map={opp:'Opportunite',client:'Client',act:'Activite',user:'Utilisateur'};
+    const table=map[modal.type];
+    const {id,gristHelper_Display,gristHelper_Display2,gristHelper_Display3,...data}=form;
+    Object.keys(data).forEach(k=>{if(data[k]===undefined||data[k]==='')delete data[k]});
+    onSave(table,modal.data?.id,data);
+  };
+  return(<div className="modal-bg" onClick={onClose}>
+    <div className="modal" onClick={e=>e.stopPropagation()}>
+      <h3>{modal.data?'Modifier':'Créer'}</h3>
+      <form onSubmit={submit}>
+        {modal.type==='opp'&&<>
+          <div className="field"><label>Nom</label><input value={form.nom||''} onChange={e=>set('nom',e.target.value)} required/></div>
+          <div className="field"><label>Client</label><select value={form.client||''} onChange={e=>set('client',Number(e.target.value)||null)}><option value="">—</option>{clients.map(c=><option key={c.id} value={c.id}>{c.nom}</option>)}</select></div>
+          <div className="field"><label>Statut</label><select value={form.statut||''} onChange={e=>set('statut',e.target.value)}><option value="">—</option><option>Prospection</option><option>Négociation</option><option>Gagnée</option><option>Perdue</option></select></div>
+          <div className="field"><label>Montant (€)</label><input type="number" value={form.montant||''} onChange={e=>set('montant',Number(e.target.value))}/></div>
+        </>}
+        {modal.type==='client'&&<>
+          <div className="field"><label>Nom</label><input value={form.nom||''} onChange={e=>set('nom',e.target.value)} required/></div>
+          <div className="field"><label>Email</label><input type="email" value={form.email||''} onChange={e=>set('email',e.target.value)}/></div>
+          <div className="field"><label>Téléphone</label><input value={form.telephone||''} onChange={e=>set('telephone',e.target.value)}/></div>
+        </>}
+        {modal.type==='act'&&<>
+          <div className="field"><label>Type</label><select value={form.type||''} onChange={e=>set('type',e.target.value)}><option value="">—</option><option>Appel</option><option>Email</option><option>Réunion</option></select></div>
+          <div className="field"><label>Description</label><textarea value={form.description||''} onChange={e=>set('description',e.target.value)}/></div>
+          <div className="field"><label>Date</label><input type="date" value={form.date||''} onChange={e=>set('date',e.target.value)}/></div>
+          <div className="field"><label>Opportunité</label><select value={form.opportunite||''} onChange={e=>set('opportunite',Number(e.target.value)||null)}><option value="">—</option>{opps.map(o=><option key={o.id} value={o.id}>{o.nom}</option>)}</select></div>
+        </>}
+        {modal.type==='user'&&<>
+          <div className="field"><label>Nom</label><input value={form.nom||''} onChange={e=>set('nom',e.target.value)} required/></div>
+          <div className="field"><label>Email</label><input type="email" value={form.email||''} onChange={e=>set('email',e.target.value)} required/></div>
+          <div className="field"><label>Rôle</label><select value={form.role||''} onChange={e=>set('role',e.target.value)}><option value="">—</option><option>Admin</option><option>Commerciaux</option></select></div>
+        </>}
+        <div className="actions">
+          <button type="button" className="btn sec" onClick={onClose}>Annuler</button>
+          <button type="submit" className="btn">Enregistrer</button>
+        </div>
+      </form>
+    </div>
+  </div>);
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
