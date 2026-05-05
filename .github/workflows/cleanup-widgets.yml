@@ -11,6 +11,8 @@ jobs:
     permissions:
       contents: write
       issues: write
+    env:
+      RETENTION_DAYS: '10'
 
     steps:
       - name: Checkout repo
@@ -18,8 +20,6 @@ jobs:
 
       - name: Identifier et fermer les issues anciennes
         uses: actions/github-script@v7
-        env:
-          RETENTION_DAYS: '1'
         with:
           script: |
             const fs = require('fs');
